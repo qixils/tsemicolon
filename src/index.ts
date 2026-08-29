@@ -2,7 +2,7 @@ import { ApplicationCommandOptionType, ApplicationCommandType, ChatInputCommandI
 import 'dotenv/config';
 import { readFile, writeFile } from 'fs/promises';
 import { isDeepStrictEqual } from 'util';
-import { handleClearAfter } from './clear.js';
+import { handleClearAfter, handleClearCount } from './clear.js';
 
 const { CLIENT_ID, TOKEN } = process.env;
 if (!CLIENT_ID) throw Error('No client id');
@@ -27,6 +27,8 @@ const commands: RESTPutAPIApplicationCommandsJSONBody = [
             description: 'Amount of messages to clear',
             type: ApplicationCommandOptionType.Integer,
             required: true,
+            min_value: 1,
+            max_value: 2000,
           },
         ],
       },
@@ -38,13 +40,13 @@ const commands: RESTPutAPIApplicationCommandsJSONBody = [
           {
             name: 'after',
             description: 'Message ID to delete from',
-            type: ApplicationCommandOptionType.Integer,
+            type: ApplicationCommandOptionType.String,
             required: true,
           },
           {
             name: 'before',
             description: 'Message ID to delete to',
-            type: ApplicationCommandOptionType.Integer,
+            type: ApplicationCommandOptionType.String,
             required: false,
           },
         ],
@@ -101,11 +103,14 @@ client.on(Events.ClientReady, readyClient => {
 
 const chatCommands: Record<string, (interaction: ChatInputCommandInteraction) => Promise<any>> = {
   'clear after': handleClearAfter,
+  'clear amount': handleClearCount,
 }
 
 client.on(Events.InteractionCreate, async interaction => {
   if (interaction.isChatInputCommand()) {
-    const cmd = chatCommands[interaction.commandName]
+    const subcommand = interaction.options.getSubcommand(false)
+    const key = subcommand ? `${interaction.commandName} ${subcommand}` : interaction.commandName
+    const cmd = chatCommands[key]
     if (cmd) await cmd(interaction)
   }
 });
