@@ -1,4 +1,6 @@
-import { ChatInputCommandInteraction, Message, MessageFlags, Constants, type GuildTextBasedChannel } from "discord.js"
+import { ApplicationCommandOptionType, ApplicationCommandType, ChatInputCommandInteraction, Constants, InteractionContextType, Message, MessageFlags, PermissionFlagsBits, type GuildTextBasedChannel } from "discord.js"
+import type { Feature } from "./feature.js"
+import { t } from "./i18n.js"
 
 const purge = async (channel: GuildTextBasedChannel, msgs: Message[]) => {
   const now = Date.now()
@@ -25,18 +27,18 @@ const purge = async (channel: GuildTextBasedChannel, msgs: Message[]) => {
 
 const ensurePurgeableChannel = async (interaction: ChatInputCommandInteraction): Promise<GuildTextBasedChannel | null> => {
   if (!interaction.inGuild() || !interaction.guild?.members?.me || !interaction.channel) {
-    await interaction.reply({ content: 'This command must be run in a guild.', flags: MessageFlags.Ephemeral })
+    await interaction.reply({ content: t('clear.guild_only'), flags: MessageFlags.Ephemeral })
     return null
   }
   const { channel, guild: { members: { me } } } = interaction
 
   if (!channel.isTextBased()) {
-    await interaction.reply({ content: 'This command must be run in a text channel.', flags: MessageFlags.Ephemeral })
+    await interaction.reply({ content: t('clear.text_only'), flags: MessageFlags.Ephemeral })
     return null
   }
 
-  if (!channel.permissionsFor(me).has('ManageMessages')) {
-    await interaction.reply({ content: 'I do not have access to managing messages in this channel.', flags: MessageFlags.Ephemeral })
+  if (!channel.permissionsFor(me).has(PermissionFlagsBits.ManageMessages)) {
+    await interaction.reply({ content: t('clear.bot_no_permission'), flags: MessageFlags.Ephemeral })
     return null
   }
 
@@ -82,13 +84,13 @@ export const handleClearAfter = async (interaction: ChatInputCommandInteraction)
 
   const messages = await collectMessagesAfter(channel, after, before ?? undefined)
   if (messages.length === 0) {
-    await interaction.editReply({ content: 'No messages found.' })
+    await interaction.editReply({ content: t('clear.none') })
     return
   }
 
   await purge(channel, messages)
 
-  await interaction.editReply({ content: `Deleted ${messages.length} message(s).` })
+  await interaction.editReply({ content: t('clear.done', { count: messages.length }) })
 }
 
 export const handleClearCount = async (interaction: ChatInputCommandInteraction) => {
@@ -97,7 +99,7 @@ export const handleClearCount = async (interaction: ChatInputCommandInteraction)
 
   const amount = interaction.options.getInteger("amount", true)
   if (amount < 1) {
-    await interaction.reply({ content: 'Amount must be at least 1.', flags: MessageFlags.Ephemeral })
+    await interaction.reply({ content: t('clear.too_few'), flags: MessageFlags.Ephemeral })
     return
   }
 
@@ -115,11 +117,61 @@ export const handleClearCount = async (interaction: ChatInputCommandInteraction)
   }
 
   if (messages.length === 0) {
-    await interaction.editReply({ content: 'No messages found.' })
+    await interaction.editReply({ content: t('clear.none') })
     return
   }
 
   await purge(channel, messages)
 
-  await interaction.editReply({ content: `Deleted ${messages.length} message(s).` })
+  await interaction.editReply({ content: t('clear.done', { count: messages.length }) })
+}
+
+export const clearFeature: Feature = {
+  commands: [{
+    name: 'clear',
+    description: t('command.clear.description'),
+    type: ApplicationCommandType.ChatInput,
+    contexts: [InteractionContextType.Guild],
+    default_member_permissions: PermissionFlagsBits.ManageMessages.toString(),
+    options: [
+      {
+        name: 'amount',
+        description: t('command.clear.amount.description'),
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [
+          {
+            name: 'amount',
+            description: t('command.clear.amount.option.amount'),
+            type: ApplicationCommandOptionType.Integer,
+            required: true,
+            min_value: 1,
+            max_value: 2000,
+          },
+        ],
+      },
+      {
+        name: 'after',
+        description: t('command.clear.after.description'),
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [
+          {
+            name: 'after',
+            description: t('command.clear.after.option.after'),
+            type: ApplicationCommandOptionType.String,
+            required: true,
+          },
+          {
+            name: 'before',
+            description: t('command.clear.after.option.before'),
+            type: ApplicationCommandOptionType.String,
+            required: false,
+          },
+        ],
+      },
+    ],
+  }],
+  chat: {
+    'clear after': handleClearAfter,
+    'clear amount': handleClearCount,
+  },
 }

@@ -1,2 +1,5 @@
 node_modules/
 dist/
+/semicolon-py/
+/data/
+/legacy_data/

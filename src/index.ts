@@ -1,8 +1,13 @@
 import { ApplicationCommandOptionType, ApplicationCommandType, ChatInputCommandInteraction, Client, CommandInteraction, Events, GatewayIntentBits, MessageFlags, REST, Routes, type APIApplicationCommand, type RESTPutAPIApplicationCommandsJSONBody } from 'discord.js';
 import 'dotenv/config';
-import { readFile, writeFile } from 'fs/promises';
+import { mkdir, readFile, writeFile } from 'fs/promises';
 import { isDeepStrictEqual } from 'util';
 import { handleClearAfter, handleClearCount } from './clear.js';
+import { DATA_DIR, LEGACY_DATA_DIR, LEGACY_IMPORT_LOG } from './config.js';
+import { runLegacyImports } from './legacy.js';
+import { handlePokemonCatch, handlePokemonLeaderboard, handlePokemonSearch } from './pokemon/commands.js';
+import { startDex } from './pokemon/dex.js';
+import { registerPokemonImport } from './pokemon/legacy-import.js';
 
 const { CLIENT_ID, TOKEN } = process.env;
 if (!CLIENT_ID) throw Error('No client id');
@@ -69,6 +74,35 @@ const commands: RESTPutAPIApplicationCommandsJSONBody = [
       },
     ],
   },
+  {
+    name: 'pokemon',
+    description: 'Become a virtual Pokémon Trainer',
+    options: [
+      {
+        name: 'catch',
+        description: 'Catch a Pokémon! Once per minute',
+        type: ApplicationCommandOptionType.Subcommand,
+      },
+      {
+        name: 'leaderboard',
+        description: 'Display the top Pokémon trainers',
+        type: ApplicationCommandOptionType.Subcommand,
+      },
+      {
+        name: 'search',
+        description: 'Look up a Pokémon',
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [
+          {
+            name: 'pokemon',
+            description: 'Name or Pokédex ID of the Pokémon',
+            type: ApplicationCommandOptionType.String,
+            required: true,
+          },
+        ],
+      },
+    ],
+  },
 
 ];
 
@@ -104,15 +138,45 @@ client.on(Events.ClientReady, readyClient => {
 const chatCommands: Record<string, (interaction: ChatInputCommandInteraction) => Promise<any>> = {
   'clear after': handleClearAfter,
   'clear amount': handleClearCount,
+  'pokemon catch': handlePokemonCatch,
+  'pokemon leaderboard': handlePokemonLeaderboard,
+  'pokemon search': handlePokemonSearch,
 }
 
 client.on(Events.InteractionCreate, async interaction => {
-  if (interaction.isChatInputCommand()) {
-    const subcommand = interaction.options.getSubcommand(false)
-    const key = subcommand ? `${interaction.commandName} ${subcommand}` : interaction.commandName
-    const cmd = chatCommands[key]
-    if (cmd) await cmd(interaction)
+  if (!interaction.isChatInputCommand()) return
+
+  const subcommand = interaction.options.getSubcommand(false)
+  const key = subcommand ? `${interaction.commandName} ${subcommand}` : interaction.commandName
+  const cmd = chatCommands[key]
+  if (!cmd) return
+
+  try {
+    await cmd(interaction)
+  } catch (error) {
+    console.error(`Command "${key}" failed:`, error)
+    // otherwise the user just sees "the application did not respond"
+    const reply = { content: 'Something went wrong running that command.', flags: MessageFlags.Ephemeral } as const
+    await (interaction.deferred || interaction.replied
+      ? interaction.followUp(reply)
+      : interaction.reply(reply)).catch(() => {})
   }
 });
 
+///////////////////
+///// STARTUP /////
+///////////////////
+
+await mkdir(DATA_DIR, { recursive: true })
+registerPokemonImport()
+
+// download pokedex in the background
+startDex()
+  .then(async dex => {
+    console.log(`Loaded ${dex.entries.size} Pokémon (${dex.totalVariants} variants)`)
+    await runLegacyImports(LEGACY_DATA_DIR, LEGACY_IMPORT_LOG)
+  })
+  .catch(error => console.error('Pokémon startup failed:', error))
+
 client.login(TOKEN);
+
