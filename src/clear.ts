@@ -1,5 +1,5 @@
 import { ApplicationCommandOptionType, ApplicationCommandType, ChatInputCommandInteraction, Constants, InteractionContextType, Message, MessageFlags, PermissionFlagsBits, type GuildTextBasedChannel } from "discord.js"
-import type { Feature } from "./feature.js"
+import { localizedDescription, type Feature } from "./feature.js"
 import { t } from "./i18n.js"
 
 const purge = async (channel: GuildTextBasedChannel, msgs: Message[]) => {
@@ -27,18 +27,18 @@ const purge = async (channel: GuildTextBasedChannel, msgs: Message[]) => {
 
 const ensurePurgeableChannel = async (interaction: ChatInputCommandInteraction): Promise<GuildTextBasedChannel | null> => {
   if (!interaction.inGuild() || !interaction.guild?.members?.me || !interaction.channel) {
-    await interaction.reply({ content: t('clear.guild_only'), flags: MessageFlags.Ephemeral })
+    await interaction.reply({ content: t([interaction.locale, interaction.guildLocale], 'clear.guild_only'), flags: MessageFlags.Ephemeral })
     return null
   }
   const { channel, guild: { members: { me } } } = interaction
 
   if (!channel.isTextBased()) {
-    await interaction.reply({ content: t('clear.text_only'), flags: MessageFlags.Ephemeral })
+    await interaction.reply({ content: t([interaction.locale, interaction.guildLocale], 'clear.text_only'), flags: MessageFlags.Ephemeral })
     return null
   }
 
   if (!channel.permissionsFor(me).has(PermissionFlagsBits.ManageMessages)) {
-    await interaction.reply({ content: t('clear.bot_no_permission'), flags: MessageFlags.Ephemeral })
+    await interaction.reply({ content: t([interaction.locale, interaction.guildLocale], 'clear.bot_no_permission'), flags: MessageFlags.Ephemeral })
     return null
   }
 
@@ -84,13 +84,13 @@ export const handleClearAfter = async (interaction: ChatInputCommandInteraction)
 
   const messages = await collectMessagesAfter(channel, after, before ?? undefined)
   if (messages.length === 0) {
-    await interaction.editReply({ content: t('clear.none') })
+    await interaction.editReply({ content: t([interaction.locale, interaction.guildLocale], 'clear.none') })
     return
   }
 
   await purge(channel, messages)
 
-  await interaction.editReply({ content: t('clear.done', { count: messages.length }) })
+  await interaction.editReply({ content: t([interaction.locale, interaction.guildLocale], 'clear.done', { count: messages.length }) })
 }
 
 export const handleClearCount = async (interaction: ChatInputCommandInteraction) => {
@@ -99,7 +99,7 @@ export const handleClearCount = async (interaction: ChatInputCommandInteraction)
 
   const amount = interaction.options.getInteger("amount", true)
   if (amount < 1) {
-    await interaction.reply({ content: t('clear.too_few'), flags: MessageFlags.Ephemeral })
+    await interaction.reply({ content: t([interaction.locale, interaction.guildLocale], 'clear.too_few'), flags: MessageFlags.Ephemeral })
     return
   }
 
@@ -117,31 +117,31 @@ export const handleClearCount = async (interaction: ChatInputCommandInteraction)
   }
 
   if (messages.length === 0) {
-    await interaction.editReply({ content: t('clear.none') })
+    await interaction.editReply({ content: t([interaction.locale, interaction.guildLocale], 'clear.none') })
     return
   }
 
   await purge(channel, messages)
 
-  await interaction.editReply({ content: t('clear.done', { count: messages.length }) })
+  await interaction.editReply({ content: t([interaction.locale, interaction.guildLocale], 'clear.done', { count: messages.length }) })
 }
 
 export const clearFeature: Feature = {
   commands: [{
     name: 'clear',
-    description: t('command.clear.description'),
+    ...localizedDescription('command.clear.description'),
     type: ApplicationCommandType.ChatInput,
     contexts: [InteractionContextType.Guild],
     default_member_permissions: PermissionFlagsBits.ManageMessages.toString(),
     options: [
       {
         name: 'amount',
-        description: t('command.clear.amount.description'),
+        ...localizedDescription('command.clear.amount.description'),
         type: ApplicationCommandOptionType.Subcommand,
         options: [
           {
             name: 'amount',
-            description: t('command.clear.amount.option.amount'),
+            ...localizedDescription('command.clear.amount.option.amount'),
             type: ApplicationCommandOptionType.Integer,
             required: true,
             min_value: 1,
@@ -151,18 +151,18 @@ export const clearFeature: Feature = {
       },
       {
         name: 'after',
-        description: t('command.clear.after.description'),
+        ...localizedDescription('command.clear.after.description'),
         type: ApplicationCommandOptionType.Subcommand,
         options: [
           {
             name: 'after',
-            description: t('command.clear.after.option.after'),
+            ...localizedDescription('command.clear.after.option.after'),
             type: ApplicationCommandOptionType.String,
             required: true,
           },
           {
             name: 'before',
-            description: t('command.clear.after.option.before'),
+            ...localizedDescription('command.clear.after.option.before'),
             type: ApplicationCommandOptionType.String,
             required: false,
           },

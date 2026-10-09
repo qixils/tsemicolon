@@ -9,9 +9,10 @@ import {
   time,
   type ChatInputCommandInteraction,
   type Client,
+  type GuildMember,
 } from 'discord.js'
 import { text, withSchema } from '../db.js'
-import type { Feature } from '../feature.js'
+import { localizedDescription, type Feature } from '../feature.js'
 import { t, type MessageKey, type Vars } from '../i18n.js'
 import { outranks, parseSnowflake, truncate } from '../util/discord.js'
 import { parseWhen } from '../util/time.js'
@@ -47,26 +48,43 @@ const runLegacyUnmutes = async (client: Client) => {
       const role = guild.roles.cache.get(roleId)
       const member = await guild.members.fetch(userId).catch(() => null)
       if (role?.editable && member?.roles.cache.has(roleId)) {
-        await member.roles.remove(role, t('mute.legacy_expired')).catch(() => {})
+        await member.roles.remove(role, t([guild.preferredLocale], 'mute.legacy_expired')).catch(() => {})
       }
     }
     db().prepare('DELETE FROM legacy_unmutes WHERE guild_id = ? AND user_id = ? AND role_id = ?').run(guildId, userId, roleId)
   }
 }
 
+/** DMs a member that they've been muted. Returns whether it was delivered */
+export const notifyMuted = async (member: GuildMember, until: Date, reason?: string | null) => {
+  try {
+    // we don't know the member's own locale outside of their interactions
+    const locales = [member.guild.preferredLocale]
+    const lines = [t(locales, 'mute.dm', {
+      guild: escapeMarkdown(member.guild.name),
+      until: time(until, TimestampStyles.FullDateShortTime),
+      relative: time(until, TimestampStyles.RelativeTime),
+    })]
+    if (reason) lines.push(t(locales, 'mute.dm_reason', { reason }))
+    return await member.send({ content: lines.join('\n') }).then(() => true, () => false)
+  } catch {
+    return false
+  }
+}
+
 const fail = (interaction: ChatInputCommandInteraction, key: MessageKey, vars: Vars = {}) =>
-  interaction.reply({ content: t(key, vars), flags: MessageFlags.Ephemeral })
+  interaction.reply({ content: t([interaction.locale, interaction.guildLocale], key, vars), flags: MessageFlags.Ephemeral })
 
 const auditReason = (interaction: ChatInputCommandInteraction, command: string) => {
   const reason = interaction.options.getString('reason')
-  const signature = t('moderation.audit', { moderator: interaction.user.tag, id: interaction.user.id, command })
+  const signature = t([interaction.locale, interaction.guildLocale], 'moderation.audit', { moderator: interaction.user.tag, id: interaction.user.id, command })
   return truncate(reason ? `${reason}\n${signature}` : signature, 512)
 }
 
 const reasonOption = {
   type: ApplicationCommandOptionType.String as const,
   name: 'reason',
-  description: t('command.moderation.option.reason'),
+  ...localizedDescription('command.moderation.option.reason'),
   max_length: 400,
 }
 
@@ -74,7 +92,7 @@ export const moderationFeature: Feature = {
   commands: [
     {
       name: 'ban',
-      description: t('command.ban.description'),
+      ...localizedDescription('command.ban.description'),
       type: ApplicationCommandType.ChatInput,
       contexts: [InteractionContextType.Guild],
       default_member_permissions: PermissionFlagsBits.BanMembers.toString(),
@@ -82,16 +100,16 @@ export const moderationFeature: Feature = {
         {
           type: ApplicationCommandOptionType.String,
           name: 'user_id',
-          description: t('command.ban.option.user_id'),
+          ...localizedDescription('command.ban.option.user_id'),
           required: true,
           max_length: 32,
         },
         {
           type: ApplicationCommandOptionType.Integer,
           name: 'delete_messages',
-          description: t('command.ban.option.delete_messages'),
+          ...localizedDescription('command.ban.option.delete_messages'),
           choices: Array.from({ length: 8 }, (_, days) => ({
-            name: days === 0 ? t('ban.keep_messages') : t('ban.delete_days', { count: days }),
+            name: days === 0 ? t([], 'ban.keep_messages') : t([], 'ban.delete_days', { count: days }),
             value: days,
           })),
         },
@@ -100,7 +118,7 @@ export const moderationFeature: Feature = {
     },
     {
       name: 'mute',
-      description: t('command.mute.description'),
+      ...localizedDescription('command.mute.description'),
       type: ApplicationCommandType.ChatInput,
       contexts: [InteractionContextType.Guild],
       default_member_permissions: PermissionFlagsBits.ModerateMembers.toString(),
@@ -108,17 +126,22 @@ export const moderationFeature: Feature = {
         {
           type: ApplicationCommandOptionType.User,
           name: 'member',
-          description: t('command.mute.option.member'),
+          ...localizedDescription('command.mute.option.member'),
           required: true,
         },
         {
           type: ApplicationCommandOptionType.String,
           name: 'duration',
-          description: t('command.mute.option.duration'),
+          ...localizedDescription('command.mute.option.duration'),
           required: true,
           max_length: 100,
         },
         reasonOption,
+        {
+          type: ApplicationCommandOptionType.Boolean,
+          name: 'notify_user',
+          ...localizedDescription('command.mute.option.notify_user'),
+        },
       ],
     },
   ],
@@ -126,6 +149,7 @@ export const moderationFeature: Feature = {
     ban: async interaction => {
       if (!interaction.inCachedGuild()) return
       const { guild, member } = interaction
+      const locales = [interaction.locale, interaction.guildLocale]
       const id = parseSnowflake(interaction.options.getString('user_id', true))
       if (!id) return fail(interaction, 'ban.invalid_id')
 
@@ -143,10 +167,11 @@ export const moderationFeature: Feature = {
 
       const days = interaction.options.getInteger('delete_messages') ?? 0
       await guild.bans.create(id, { deleteMessageSeconds: days * DAY_SECONDS, reason: auditReason(interaction, 'ban') })
-      await interaction.reply({ content: t('ban.done', { user: user.toString(), tag: escapeMarkdown(user.tag) }) })
+      await interaction.reply({ content: t(locales, 'ban.done', { user: user.toString(), tag: escapeMarkdown(user.tag) }) })
     },
     mute: async interaction => {
       if (!interaction.inCachedGuild()) return
+      const locales = [interaction.locale, interaction.guildLocale]
       const target = interaction.options.getMember('member')
       if (!target) return fail(interaction, 'mute.not_member')
 
@@ -163,12 +188,16 @@ export const moderationFeature: Feature = {
 
       await target.timeout(duration, auditReason(interaction, 'mute'))
       await interaction.reply({
-        content: t('mute.done', {
+        content: t(locales, 'mute.done', {
           user: target.toString(),
           until: time(until, TimestampStyles.FullDateShortTime),
           relative: time(until, TimestampStyles.RelativeTime),
         }),
       })
+      const reason = interaction.options.getBoolean('notify_user') ? interaction.options.getString('reason') : null
+      if (!await notifyMuted(target, until, reason)) {
+        await interaction.followUp({ content: t(locales, 'mute.dm_failed'), flags: MessageFlags.Ephemeral })
+      }
     },
   },
   attach(client) {

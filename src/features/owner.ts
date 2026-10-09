@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { ChannelType, Events, type Message } from 'discord.js'
+import { ChannelType, Events, type Message, type TextBasedChannel } from 'discord.js'
 import { OWNER_ID } from '../config.js'
 import type { Feature } from '../feature.js'
 import { t } from '../i18n.js'
 import { chunkLines } from '../util/discord.js'
+import { botEmoji } from '../util/emoji.js'
 
 const run = promisify(execFile)
 /** whether to spawn npm in a shell (required on windows) */
@@ -22,8 +23,8 @@ const step = async (command: string, args: string[]): Promise<StepResult> => {
   }
 }
 
-const block = (label: string, result: StepResult) =>
-  `**${label}** ${result.ok ? '✅' : '❌'}\n\`\`\`\n${result.output.slice(-1500) || ' '}\n\`\`\``
+const block = (channel: TextBasedChannel, label: string, result: StepResult) =>
+  `**${label}** ${botEmoji(result.ok ? 'success' : 'failure', channel)}\n\`\`\`\n${result.output.slice(-1500) || ' '}\n\`\`\``
 
 /**
  * pulls, installs dependencies, and rebuilds
@@ -32,17 +33,17 @@ const update = async (message: Message) => {
   if (message.channel.isSendable()) await message.channel.sendTyping().catch(() => {})
   const before = (await step('git', ['rev-parse', 'HEAD'])).output
   const pull = await step('git', ['pull', '--ff-only'])
-  const reports = [block('git pull', pull)]
+  const reports = [block(message.channel, 'git pull', pull)]
 
   if (pull.ok) {
     const changed = (await step('git', ['diff', '--name-only', before, 'HEAD'])).output.split('\n')
     let installed: StepResult | null = null
     if (changed.some(file => file === 'package-lock.json' || file === 'package.json')) {
       installed = await step('npm', ['ci'])
-      reports.push(block('npm ci', installed))
+      reports.push(block(message.channel, 'npm ci', installed))
     }
-    if (installed?.ok !== false) reports.push(block('npm run build', await step('npm', ['run', 'build'])))
-    reports.push(t(installed ? 'owner.update.restart_needed_deps' : 'owner.update.restart'))
+    if (installed?.ok !== false) reports.push(block(message.channel, 'npm run build', await step('npm', ['run', 'build'])))
+    reports.push(t([], installed ? 'owner.update.restart_needed_deps' : 'owner.update.restart'))
   }
 
   for (const content of chunkLines(reports.join('\n'))) {
@@ -60,7 +61,7 @@ export const ownerFeature = (shutdown: Shutdown): Feature => ({
       const command = message.content.trim().toLowerCase()
       try {
         if (command === 'logout') {
-          await message.reply({ content: t('owner.logout') })
+          await message.reply({ content: t([], 'owner.logout') })
           await shutdown('logout command invoked')
         } else if (command === 'update') {
           await update(message)

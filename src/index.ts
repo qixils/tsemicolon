@@ -1,112 +1,89 @@
-import { ApplicationCommandOptionType, ApplicationCommandType, ChatInputCommandInteraction, Client, CommandInteraction, Events, GatewayIntentBits, MessageFlags, REST, Routes, type APIApplicationCommand, type RESTPutAPIApplicationCommandsJSONBody } from 'discord.js';
+import { Client, Events, GatewayIntentBits, Partials, REST, Routes, type RESTPutAPIApplicationCommandsJSONBody } from 'discord.js';
 import 'dotenv/config';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { isDeepStrictEqual } from 'util';
-import { handleClearAfter, handleClearCount } from './clear.js';
+import { clearFeature } from './clear.js';
 import { DATA_DIR, LEGACY_DATA_DIR, LEGACY_IMPORT_LOG } from './config.js';
+import { closeDb } from './db.js';
+import { FeatureRegistry, replyWithError } from './feature.js';
+import { antispamFeature } from './features/antispam.js';
+import { joinRoleFeature } from './features/join-role.js';
+import { logsFeature } from './features/logs.js';
+import { moderationFeature } from './features/moderation.js';
+import { ownerFeature } from './features/owner.js';
+import { pollFeature } from './features/poll.js';
+import { remindersFeature } from './features/reminders.js';
+import { reportsFeature } from './features/reports.js';
+import { rolesFeature } from './features/roles.js';
+import { rulesFeature } from './features/rules.js';
+import { starboardFeature } from './features/starboard.js';
+import { subscriptionsFeature } from './features/subscriptions.js';
+import { t } from './i18n.js';
+import { registerConfigImports } from './legacy/config-db.js';
 import { runLegacyImports } from './legacy.js';
-import { handlePokemonCatch, handlePokemonLeaderboard, handlePokemonSearch } from './pokemon/commands.js';
-import { startDex } from './pokemon/dex.js';
+import { pokemonFeature } from './pokemon/commands.js';
 import { registerPokemonImport } from './pokemon/legacy-import.js';
+import { settingsFeature } from './settings.js';
 
 const { CLIENT_ID, TOKEN } = process.env;
 if (!CLIENT_ID) throw Error('No client id');
 if (!TOKEN) throw Error('No token');
 
+await mkdir(DATA_DIR, { recursive: true })
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    // privileged: join/role/timeout logs and the member cache they diff against
+    GatewayIntentBits.GuildMembers,
+    // bans, unbans
+    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessageReactions,
+    // privileged: message logs and antispam read message text
+    GatewayIntentBits.MessageContent,
+    // admin DM commands
+    GatewayIntentBits.DirectMessages,
+  ],
+  // events for things that aren't cached: reactions on old messages, deletions, DMs
+  partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User, Partials.GuildMember],
+  // nothing pings unless a message opts in explicitly
+  allowedMentions: { parse: [], repliedUser: false },
+});
+
+let shuttingDown = false
+const shutdown = async (reason: string) => {
+  if (shuttingDown) return
+  shuttingDown = true
+  console.log(`Shutting down: ${reason}`)
+  await client.destroy()
+  closeDb()
+  process.exit(0)
+}
+
+const registry = new FeatureRegistry([
+  clearFeature,
+  pokemonFeature,
+  settingsFeature,
+  logsFeature,
+  starboardFeature,
+  rulesFeature,
+  reportsFeature,
+  antispamFeature,
+  joinRoleFeature,
+  pollFeature,
+  remindersFeature,
+  moderationFeature,
+  rolesFeature,
+  subscriptionsFeature,
+  ownerFeature(shutdown),
+])
+
 ////////////////////
 ///// COMMANDS /////
 ////////////////////
 
-const commands: RESTPutAPIApplicationCommandsJSONBody = [
-  {
-    name: 'clear',
-    description: 'Delete messages',
-    options: [
-      {
-        name: 'amount',
-        description: 'Clear a number of messages',
-        type: ApplicationCommandOptionType.Subcommand,
-        options: [
-          {
-            name: 'amount',
-            description: 'Amount of messages to clear',
-            type: ApplicationCommandOptionType.Integer,
-            required: true,
-            min_value: 1,
-            max_value: 2000,
-          },
-        ],
-      },
-      {
-        name: 'after',
-        description: 'Clear messages between an ID range',
-        type: ApplicationCommandOptionType.Subcommand,
-        options: [
-          {
-            name: 'after',
-            description: 'Message ID to delete from',
-            type: ApplicationCommandOptionType.String,
-            required: true,
-          },
-          {
-            name: 'before',
-            description: 'Message ID to delete to',
-            type: ApplicationCommandOptionType.String,
-            required: false,
-          },
-        ],
-      }
-    ]
-  },
-  {
-    name: 'role',
-    description: 'Pick roles to apply',
-    options: [
-      {
-        name: 'color',
-        description: 'Pick a color role to apply if available',
-        type: ApplicationCommandOptionType.Subcommand,
-      },
-      {
-        name: 'flair',
-        description: 'Pick an optional role to apply if available',
-        type: ApplicationCommandOptionType.Subcommand,
-      },
-    ],
-  },
-  {
-    name: 'pokemon',
-    description: 'Become a virtual Pokémon Trainer',
-    options: [
-      {
-        name: 'catch',
-        description: 'Catch a Pokémon! Once per minute',
-        type: ApplicationCommandOptionType.Subcommand,
-      },
-      {
-        name: 'leaderboard',
-        description: 'Display the top Pokémon trainers',
-        type: ApplicationCommandOptionType.Subcommand,
-      },
-      {
-        name: 'search',
-        description: 'Look up a Pokémon',
-        type: ApplicationCommandOptionType.Subcommand,
-        options: [
-          {
-            name: 'pokemon',
-            description: 'Name or Pokédex ID of the Pokémon',
-            type: ApplicationCommandOptionType.String,
-            required: true,
-          },
-        ],
-      },
-    ],
-  },
-
-];
-
-// register commands
+const commands: RESTPutAPIApplicationCommandsJSONBody = registry.commands
 
 const cmdsPath = "saved_commands.json"
 let oldCommands: RESTPutAPIApplicationCommandsJSONBody = []
@@ -129,54 +106,32 @@ if (!isDeepStrictEqual(commands, oldCommands)) {
   }
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-
-client.on(Events.ClientReady, readyClient => {
-  console.log(`Logged in as ${readyClient.user.tag}!`);
-});
-
-const chatCommands: Record<string, (interaction: ChatInputCommandInteraction) => Promise<any>> = {
-  'clear after': handleClearAfter,
-  'clear amount': handleClearCount,
-  'pokemon catch': handlePokemonCatch,
-  'pokemon leaderboard': handlePokemonLeaderboard,
-  'pokemon search': handlePokemonSearch,
-}
-
-client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isChatInputCommand()) return
-
-  const subcommand = interaction.options.getSubcommand(false)
-  const key = subcommand ? `${interaction.commandName} ${subcommand}` : interaction.commandName
-  const cmd = chatCommands[key]
-  if (!cmd) return
-
-  try {
-    await cmd(interaction)
-  } catch (error) {
-    console.error(`Command "${key}" failed:`, error)
-    // otherwise the user just sees "the application did not respond"
-    const reply = { content: 'Something went wrong running that command.', flags: MessageFlags.Ephemeral } as const
-    await (interaction.deferred || interaction.replied
-      ? interaction.followUp(reply)
-      : interaction.reply(reply)).catch(() => {})
-  }
-});
-
 ///////////////////
 ///// STARTUP /////
 ///////////////////
 
-await mkdir(DATA_DIR, { recursive: true })
+registry.attach(client)
 registerPokemonImport()
+registerConfigImports()
 
-// download pokedex in the background
-startDex()
-  .then(async dex => {
-    console.log(`Loaded ${dex.entries.size} Pokémon (${dex.totalVariants} variants)`)
-    await runLegacyImports(LEGACY_DATA_DIR, LEGACY_IMPORT_LOG)
-  })
-  .catch(error => console.error('Pokémon startup failed:', error))
+client.once(Events.ClientReady, async readyClient => {
+  console.log(`Logged in as ${readyClient.user.tag}!`);
+  // importers can look up servers and channels once the client is ready
+  await runLegacyImports(LEGACY_DATA_DIR, LEGACY_IMPORT_LOG, readyClient)
+    .catch(error => console.error('Legacy import failed:', error))
+});
+
+client.on(Events.InteractionCreate, async interaction => {
+  try {
+    await registry.dispatch(interaction)
+  } catch (error) {
+    console.error(`Interaction ${interaction.id} failed:`, error)
+    // otherwise the user just sees "the application did not respond"
+    await replyWithError(interaction, t([interaction.locale, interaction.guildLocale], 'error.generic')).catch(() => {})
+  }
+});
+
+process.on('SIGINT', () => void shutdown('SIGINT'))
+process.on('SIGTERM', () => void shutdown('SIGTERM'))
 
 client.login(TOKEN);
-

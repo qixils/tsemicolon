@@ -75,7 +75,7 @@ const IMAGE = /\.(png|jpe?g|gif|webp)$/i
  * Shows the first image attachment in the embed
  * and notes how many other attachments and embeds were left out
  */
-export const addMediaPreview = (embed: EmbedBuilder, message: Message) => {
+export const addMediaPreview = (embed: EmbedBuilder, message: Message, locales: (string | null | undefined)[] = []) => {
   let shown = false
   let hiddenAttachments = 0
   for (const attachment of message.attachments.values()) {
@@ -88,15 +88,15 @@ export const addMediaPreview = (embed: EmbedBuilder, message: Message) => {
   }
 
   const notes = [
-    ...(hiddenAttachments ? [t('media.hidden_attachments', { count: hiddenAttachments })] : []),
-    ...(message.embeds.length ? [t('media.hidden_embeds', { count: message.embeds.length })] : []),
+    ...(hiddenAttachments ? [t(locales, 'media.hidden_attachments', { count: hiddenAttachments })] : []),
+    ...(message.embeds.length ? [t(locales, 'media.hidden_embeds', { count: message.embeds.length })] : []),
   ]
-  if (notes.length) embed.addFields({ name: t('media.not_shown'), value: notes.join('\n') })
+  if (notes.length) embed.addFields({ name: t(locales, 'media.not_shown'), value: notes.join('\n') })
 }
 
 /** Truncates the input text, or returns a placeholder if no content is provided */
-export const displayContent = (content: string | null | undefined, limit: number) =>
-  content ? truncate(content, limit) : t('message.blank')
+export const displayContent = (content: string | null | undefined, limit: number, locales: (string | null | undefined)[] = []) =>
+  content ? truncate(content, limit) : t(locales, 'message.blank')
 
 /** Whether `member` has higher role(s) than `comparedTo` */
 export const outranks = (member: GuildMember, comparedTo: GuildMember) => {

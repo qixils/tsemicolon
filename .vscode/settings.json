@@ -1,0 +1,12 @@
+{
+  "i18n-ally.enabledFrameworks": ["custom"],
+  "i18n-ally.enabledParsers": ["json"],
+  "i18n-ally.localesPaths": ["src/locales"],
+  "i18n-ally.pathMatcher": "{locale}.json",
+  "i18n-ally.sourceLanguage": "en-US",
+  "i18n-ally.displayLanguage": "en-US",
+  "i18n-ally.readonly": true,
+  // Switch this to "flat" if disabling readonly.
+  // It will cause plurals to stop displaying but ensures they don't get corrupted.
+  "i18n-ally.keystyle": "nested"
+}
