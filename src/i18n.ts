@@ -11,28 +11,36 @@ const tables: Record<Locale, Record<MessageKey, Template>> = {
   'en-US': messages,
 }
 
+const allLocales = Object.keys(tables) as Readonly<Locale[]>
+
 const allPlurals = Object.fromEntries(
-  Object.keys(tables).map(locale => [locale, new Intl.PluralRules(locale)])
+  allLocales.map(locale => [locale, new Intl.PluralRules(locale)])
 ) as Record<Locale, Intl.PluralRules>
 
 type MaybeLocale = string | null | undefined
+export type MaybeLocales = MaybeLocale | MaybeLocale[]
 
-/**
- * Looks up a message and fills in its `{placeholders}`.
- * Plural messages pick their form from `vars.count`.
- */
-export const t = (locales: MaybeLocale | MaybeLocale[], key: MessageKey, vars: Vars = {}): string => {
+const verifyLocales = (locales: MaybeLocales): Locale[] => {
   if (!locales) locales = []
   else if (typeof locales === 'string') locales = [locales]
-  const mapped = locales.flatMap(item => {
+
+  return locales.flatMap(item => {
     if (!item) return []
     if (item in tables) return [item as Locale]
 
     const lang = item.split('-')[0]
     if (!lang) return []
 
-    return (Object.keys(tables) as Locale[]).filter(loc => loc.split('-')[0] === lang)
+    return allLocales.filter(loc => loc.split('-')[0] === lang)
   })
+}
+
+/**
+ * Looks up a message and fills in its `{placeholders}`.
+ * Plural messages pick their form from `vars.count`.
+ */
+export const t = (locales: MaybeLocales, key: MessageKey, vars: Vars = {}): string => {
+  const mapped = verifyLocales(locales)
   const locale = mapped.find(lang => tables[lang][key]) ?? DEFAULT_LOCALE
   const entry = tables[locale][key]
   const template = typeof entry === 'string'
@@ -47,8 +55,10 @@ export const t = (locales: MaybeLocale | MaybeLocale[], key: MessageKey, vars: V
 
 /** Returns every translation for the provided key */
 export const tAll = (key: MessageKey, vars: Vars = {}): Partial<Record<Locale, string>> =>
-  Object.fromEntries((Object.keys(tables) as Locale[]).map(locale => [locale, t([locale], key, vars)]))
+  Object.fromEntries(allLocales.map(locale => [locale, t([locale], key, vars)]))
 
 /** Formats a number for display, e.g. `1,234`. */
-export const formatNumber = (locales: MaybeLocale[], value: number) =>
-  value.toLocaleString([...locales.filter((locale): locale is string => !!locale), DEFAULT_LOCALE])
+export const formatNumber = (locales: MaybeLocales, value: number) =>
+  // we use verifyLocales so that we don't localize numbers into languages the bot doesn't support
+  // as it is my understanding that say, german folk generally find it confusing to have english text with german numbers
+  value.toLocaleString([...verifyLocales(locales), DEFAULT_LOCALE])

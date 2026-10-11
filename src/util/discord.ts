@@ -10,7 +10,7 @@ import {
   type MessageMentionOptions,
   type PermissionResolvable,
 } from 'discord.js'
-import { t } from '../i18n.js'
+import { t, type MaybeLocales } from '../i18n.js'
 
 /**
  * Channels the bot can be configured to consistently post to.
@@ -75,7 +75,7 @@ const IMAGE = /\.(png|jpe?g|gif|webp)$/i
  * Shows the first image attachment in the embed
  * and notes how many other attachments and embeds were left out
  */
-export const addMediaPreview = (embed: EmbedBuilder, message: Message, locales: (string | null | undefined)[] = []) => {
+export const addMediaPreview = (embed: EmbedBuilder, message: Message, locales: MaybeLocales = []) => {
   let shown = false
   let hiddenAttachments = 0
   for (const attachment of message.attachments.values()) {
@@ -95,7 +95,7 @@ export const addMediaPreview = (embed: EmbedBuilder, message: Message, locales: 
 }
 
 /** Truncates the input text, or returns a placeholder if no content is provided */
-export const displayContent = (content: string | null | undefined, limit: number, locales: (string | null | undefined)[] = []) =>
+export const displayContent = (content: string | null | undefined, limit: number, locales: MaybeLocales = []) =>
   content ? truncate(content, limit) : t(locales, 'message.blank')
 
 /** Whether `member` has higher role(s) than `comparedTo` */

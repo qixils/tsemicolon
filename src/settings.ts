@@ -17,8 +17,8 @@ import {
   type PermissionResolvable,
 } from 'discord.js'
 import { withSchema } from './db.js'
-import { customId, localizedDescription, type ChatHandler, type Feature } from './feature.js'
-import { t, type MessageKey } from './i18n.js'
+import { customId, localizedDescription, localizedName, type ChatHandler, type Feature } from './feature.js'
+import { t, type MaybeLocales, type MessageKey } from './i18n.js'
 import { SENDABLE_TEXT_CHANNEL_TYPES, postableChannel } from './util/discord.js'
 
 const db = withSchema(`
@@ -34,6 +34,8 @@ const db = withSchema(`
 export interface Settings {
   /** Channel to report joins, leaves, etc */
   joinlog_channel: string
+  /** Channel to report name changes, if not the joinlog */
+  namelog_channel: string
   /** Channel to report message edits and deletions */
   messagelog_channel: string
   /** Channel to report members gaining or losing roles */
@@ -68,27 +70,27 @@ export const clearSetting = (guildId: string, key: SettingKey) => {
 }
 
 /** The configured channel for `key`, if it exists and the bot can post there */
-export const settingChannel = (
+export const getSettingChannel = (
   guild: Guild,
-  key: 'joinlog_channel' | 'messagelog_channel' | 'rolelog_channel' | 'reports_channel' | 'antispam_channel',
+  key: 'joinlog_channel' | 'namelog_channel' | 'messagelog_channel' | 'rolelog_channel' | 'reports_channel' | 'antispam_channel',
   extra: PermissionResolvable[] = [],
 ): GuildTextBasedChannel | null => postableChannel(guild, getSetting(guild.id, key), extra)
 
 /** Generates the channel-setting option for config commands */
-export const channelSubcommand = (name: string, description: MessageKey): APIApplicationCommandSubcommandOption => ({
+export const channelSubcommand = (name: MessageKey, description: MessageKey): APIApplicationCommandSubcommandOption => ({
   type: ApplicationCommandOptionType.Subcommand,
-  name,
+  ...localizedName(name),
   ...localizedDescription(description),
   options: [{
     type: ApplicationCommandOptionType.Channel,
-    name: 'channel',
-    ...localizedDescription('command.setup.option.channel'),
+    ...localizedName('command.setup.option.channel.name'),
+    ...localizedDescription('command.setup.option.channel.description'),
     channel_types: SENDABLE_TEXT_CHANNEL_TYPES,
   }],
 })
 
 export interface ChannelSetup {
-  setting: 'joinlog_channel' | 'messagelog_channel' | 'rolelog_channel' | 'reports_channel'
+  setting: 'joinlog_channel' | 'namelog_channel' | 'messagelog_channel' | 'rolelog_channel' | 'reports_channel'
   /** Name used when the bot has to create the channel */
   defaultName: string
   topic: MessageKey
@@ -96,8 +98,8 @@ export interface ChannelSetup {
   private?: boolean
   /** Confirmation message key. Translated with `{channel}`. */
   done: MessageKey
-  /** Extra advice appended to the confirmation such as recommended permissions */
-  notes?: (guild: Guild) => string[]
+  /** Generates extra advice appended to the confirmation such as recommended permissions, given the guild and the viewer's locales */
+  notes?: (guild: Guild, locales: MaybeLocales) => string[]
 }
 
 const NAMESPACE = 'setupchannel'
@@ -120,7 +122,6 @@ const createChannel = (
   hidden: boolean,
 ) => {
   const { guild } = interaction
-  const locales = [interaction.locale, interaction.guildLocale]
   const self = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ReadMessageHistory]
   const overwrites: OverwriteResolvable[] = hidden
     ? [
@@ -139,17 +140,17 @@ const createChannel = (
   return guild.channels.create({
     name: setup.defaultName,
     type: ChannelType.GuildText,
-    topic: t(locales, setup.topic),
+    topic: t(interaction.guildLocale, setup.topic),
     parent,
     permissionOverwrites: overwrites,
-    reason: t(locales, 'audit.requested_by', { user: interaction.user.tag }),
+    reason: t(interaction.guildLocale, 'audit.requested_by', { user: interaction.user.tag }),
   })
 }
 
 /** Sets a feature to use this channel or reports why it's unusable */
 const assignChannel = (
   guild: Guild,
-  locales: (string | null | undefined)[],
+  locales: MaybeLocales,
   setup: ChannelSetup,
   channel: GuildTextBasedChannel,
   created?: 'public' | 'private',
@@ -159,13 +160,13 @@ const assignChannel = (
   }
   setSetting(guild.id, setup.setting, channel.id)
   const lines = [t(locales, setup.done, { channel: channel.toString() })]
-  if (created) lines.push(t(locales, created === 'private' ? 'setup.private_channel_created' : 'setup.channel_created'))
-  lines.push(...setup.notes?.(guild) ?? [])
+  if (created) lines.push(t(locales, 'setup.channel_created'))
+  lines.push(...setup.notes?.(guild, locales) ?? [])
   return lines.join('\n')
 }
 
 /** Offers to create the channel, potentially as private to moderators */
-const createButtons = (setup: ChannelSetup, locales: (string | null | undefined)[]) => {
+const createButtons = (setup: ChannelSetup, locales: MaybeLocales) => {
   const button = (visibility: 'public' | 'private', style: ButtonStyle) => new ButtonBuilder()
     .setCustomId(customId(NAMESPACE, setup.setting, visibility))
     .setLabel(t(locales, visibility === 'private' ? 'setup.create_private_channel' : 'setup.create_public_channel'))
@@ -197,10 +198,17 @@ export const configureChannel = (setup: ChannelSetup): ChatHandler => {
       return
     }
 
+    const existing = getSettingChannel(guild, setup.setting)
+    if (existing) {
+      await interaction.reply({ content: t(locales, "setup.existing_channel", { channel: existing.toString() }), flags: MessageFlags.Ephemeral })
+      return
+    }
+
     if (!me.permissions.has(PermissionFlagsBits.ManageChannels)) {
       await interaction.reply({ content: t(locales, 'setup.cannot_create_channel'), flags: MessageFlags.Ephemeral })
       return
     }
+
     await interaction.reply({
       content: t(locales, 'setup.offer_channel', { name: setup.defaultName }),
       components: [createButtons(setup, locales)],
@@ -209,34 +217,41 @@ export const configureChannel = (setup: ChannelSetup): ChatHandler => {
   }
 }
 
-const DISABLEABLE: Record<string, SettingKey[]> = {
-  joinlog: ['joinlog_channel'],
-  messagelog: ['messagelog_channel'],
-  rolelog: ['rolelog_channel'],
-  reports: ['reports_channel'],
-  antispam: ['antispam_threshold', 'antispam_channel'],
-  joinrole: ['join_role'],
+const DISABLEABLE: Record<string, { name: MessageKey, keys: SettingKey[], note?: MessageKey }> = {
+  joinlog: { name: 'command.setup.joinlog.name', keys: ['joinlog_channel'] },
+  namelog: { name: 'command.setup.namelog.name', keys: ['namelog_channel'], note: 'setup.disabled.note.namelog' },
+  messagelog: { name: 'command.setup.messagelog.name', keys: ['messagelog_channel'] },
+  rolelog: { name: 'command.setup.rolelog.name', keys: ['rolelog_channel'] },
+  reports: { name: 'command.setup.reports.name', keys: ['reports_channel'] },
+  antispam: { name: 'command.setup.antispam.name', keys: ['antispam_threshold', 'antispam_channel'] },
+  joinrole: { name: 'command.setup.joinrole.name', keys: ['join_role'] },
 }
 
 export const settingsFeature: Feature = {
   setup: [{
     type: ApplicationCommandOptionType.Subcommand,
-    name: 'disable',
+    ...localizedName('command.setup.disable.name'),
     ...localizedDescription('command.setup.disable.description'),
     options: [{
       type: ApplicationCommandOptionType.String,
-      name: 'feature',
-      ...localizedDescription('command.setup.disable.option.feature'),
+      ...localizedName('command.setup.disable.option.feature.name'),
+      ...localizedDescription('command.setup.disable.option.feature.description'),
       required: true,
-      choices: Object.keys(DISABLEABLE).map(name => ({ name, value: name })),
+      choices: Object.entries(DISABLEABLE).map(([value, { name }]) => ({ ...localizedName(name), value })),
     }],
   }],
   chat: {
     'setup disable': async interaction => {
       if (!interaction.inCachedGuild()) return
       const feature = interaction.options.getString('feature', true)
-      for (const key of DISABLEABLE[feature] ?? []) clearSetting(interaction.guildId, key)
-      await interaction.reply({ content: t([interaction.locale, interaction.guildLocale], 'setup.disabled', { feature }), flags: MessageFlags.Ephemeral })
+      const data = DISABLEABLE[feature]
+      for (const key of data?.keys ?? []) clearSetting(interaction.guildId, key);
+
+      const locales = [interaction.locale, interaction.guildLocale]
+      let content = t(locales, 'setup.disabled', { feature: data ? t(locales, data.name) : feature })
+      if (data?.note) content += t(locales, data.note);
+
+      await interaction.reply({ content, flags: MessageFlags.Ephemeral })
     },
   },
   components: {

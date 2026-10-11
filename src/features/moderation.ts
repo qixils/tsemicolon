@@ -12,7 +12,7 @@ import {
   type GuildMember,
 } from 'discord.js'
 import { text, withSchema } from '../db.js'
-import { localizedDescription, type Feature } from '../feature.js'
+import { localizedDescription, localizedName, type Feature } from '../feature.js'
 import { t, type MessageKey, type Vars } from '../i18n.js'
 import { outranks, parseSnowflake, truncate } from '../util/discord.js'
 import { parseWhen } from '../util/time.js'
@@ -77,21 +77,14 @@ const fail = (interaction: ChatInputCommandInteraction, key: MessageKey, vars: V
 
 const auditReason = (interaction: ChatInputCommandInteraction, command: string) => {
   const reason = interaction.options.getString('reason')
-  const signature = t([interaction.locale, interaction.guildLocale], 'moderation.audit', { moderator: interaction.user.tag, id: interaction.user.id, command })
+  const signature = t(interaction.guildLocale, 'moderation.audit', { moderator: interaction.user.tag, id: interaction.user.id, command })
   return truncate(reason ? `${reason}\n${signature}` : signature, 512)
-}
-
-const reasonOption = {
-  type: ApplicationCommandOptionType.String as const,
-  name: 'reason',
-  ...localizedDescription('command.moderation.option.reason'),
-  max_length: 400,
 }
 
 export const moderationFeature: Feature = {
   commands: [
     {
-      name: 'ban',
+      ...localizedName('command.ban.name'),
       ...localizedDescription('command.ban.description'),
       type: ApplicationCommandType.ChatInput,
       contexts: [InteractionContextType.Guild],
@@ -99,25 +92,30 @@ export const moderationFeature: Feature = {
       options: [
         {
           type: ApplicationCommandOptionType.String,
-          name: 'user_id',
-          ...localizedDescription('command.ban.option.user_id'),
+          ...localizedName('command.ban.option.user_id.name'),
+          ...localizedDescription('command.ban.option.user_id.description'),
           required: true,
           max_length: 32,
         },
         {
           type: ApplicationCommandOptionType.Integer,
-          name: 'delete_messages',
-          ...localizedDescription('command.ban.option.delete_messages'),
+          ...localizedName('command.ban.option.delete_messages.name'),
+          ...localizedDescription('command.ban.option.delete_messages.description'),
           choices: Array.from({ length: 8 }, (_, days) => ({
-            name: days === 0 ? t([], 'ban.keep_messages') : t([], 'ban.delete_days', { count: days }),
+            ...localizedName(days === 0 ? 'ban.keep_messages' : 'ban.delete_days', { count: days }),
             value: days,
           })),
         },
-        reasonOption,
+        {
+          type: ApplicationCommandOptionType.String,
+          ...localizedName('command.ban.option.reason.name'),
+          ...localizedDescription('command.ban.option.reason.description'),
+          max_length: 400,
+        },
       ],
     },
     {
-      name: 'mute',
+      ...localizedName('command.mute.name'),
       ...localizedDescription('command.mute.description'),
       type: ApplicationCommandType.ChatInput,
       contexts: [InteractionContextType.Guild],
@@ -125,22 +123,27 @@ export const moderationFeature: Feature = {
       options: [
         {
           type: ApplicationCommandOptionType.User,
-          name: 'member',
-          ...localizedDescription('command.mute.option.member'),
+          ...localizedName('command.mute.option.member.name'),
+          ...localizedDescription('command.mute.option.member.description'),
           required: true,
         },
         {
           type: ApplicationCommandOptionType.String,
-          name: 'duration',
-          ...localizedDescription('command.mute.option.duration'),
+          ...localizedName('command.mute.option.duration.name'),
+          ...localizedDescription('command.mute.option.duration.description'),
           required: true,
           max_length: 100,
         },
-        reasonOption,
+        {
+          type: ApplicationCommandOptionType.String,
+          ...localizedName('command.mute.option.reason.name'),
+          ...localizedDescription('command.mute.option.reason.description'),
+          max_length: 400,
+        },
         {
           type: ApplicationCommandOptionType.Boolean,
-          name: 'notify_user',
-          ...localizedDescription('command.mute.option.notify_user'),
+          ...localizedName('command.mute.option.notify_user.name'),
+          ...localizedDescription('command.mute.option.notify_user.description'),
         },
       ],
     },
@@ -163,11 +166,10 @@ export const moderationFeature: Feature = {
       if (target && !outranks(member, target)) return fail(interaction, 'moderation.hierarchy')
 
       const user = target?.user ?? await interaction.client.users.fetch(id).catch(() => null)
-      if (!user) return fail(interaction, 'ban.unknown_user')
 
       const days = interaction.options.getInteger('delete_messages') ?? 0
       await guild.bans.create(id, { deleteMessageSeconds: days * DAY_SECONDS, reason: auditReason(interaction, 'ban') })
-      await interaction.reply({ content: t(locales, 'ban.done', { user: user.toString(), tag: escapeMarkdown(user.tag) }) })
+      await interaction.reply({ content: t(locales, 'ban.done', { user: `<@${id}>`, tag: escapeMarkdown(user?.tag ?? t(locales, 'common.unavailable')) }) })
     },
     mute: async interaction => {
       if (!interaction.inCachedGuild()) return

@@ -5,6 +5,7 @@ import * as chrono from 'chrono-node'
  * Returns null if unknown.
  */
 export const parseWhen = (input: string, now = new Date()): Date | null => {
+  // TODO: i18n
   const reference = { instant: now, timezone: 'UTC' }
   const options = { forwardDate: true }
   // chrono reads most bare durations itself but doesn't understand "in"

@@ -2,11 +2,12 @@ import { Client, Events, GatewayIntentBits, Partials, REST, Routes, type RESTPut
 import 'dotenv/config';
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import { isDeepStrictEqual } from 'util';
-import { clearFeature } from './clear.js';
-import { DATA_DIR, LEGACY_DATA_DIR, LEGACY_IMPORT_LOG } from './config.js';
+import { DATA_DIR, LEGACY_DATA_DIR, LEGACY_IMPORT_LOG, OWNER_ID } from './config.js';
 import { closeDb } from './db.js';
 import { FeatureRegistry, replyWithError } from './feature.js';
 import { antispamFeature } from './features/antispam.js';
+import { clearFeature } from './features/clear.js';
+import { htstemFeature } from './features/htstem.js';
 import { joinRoleFeature } from './features/join-role.js';
 import { logsFeature } from './features/logs.js';
 import { moderationFeature } from './features/moderation.js';
@@ -34,16 +35,16 @@ await mkdir(DATA_DIR, { recursive: true })
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    // privileged: join/role/timeout logs and the member cache they diff against
-    GatewayIntentBits.GuildMembers,
     // bans, unbans
     GatewayIntentBits.GuildModeration,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMessageReactions,
-    // privileged: message logs and antispam read message text
-    GatewayIntentBits.MessageContent,
     // admin DM commands
     GatewayIntentBits.DirectMessages,
+    // privileged: join/role/timeout logs and the member cache they diff against
+    GatewayIntentBits.GuildMembers,
+    // privileged: message logs and antispam read message text
+    GatewayIntentBits.MessageContent,
   ],
   // events for things that aren't cached: reactions on old messages, deletions, DMs
   partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User, Partials.GuildMember],
@@ -76,6 +77,7 @@ const registry = new FeatureRegistry([
   moderationFeature,
   rolesFeature,
   subscriptionsFeature,
+  ...(OWNER_ID === '140564059417346049' ? [htstemFeature] : []),
   ownerFeature(shutdown),
 ])
 
@@ -83,28 +85,41 @@ const registry = new FeatureRegistry([
 ///// COMMANDS /////
 ////////////////////
 
-const commands: RESTPutAPIApplicationCommandsJSONBody = registry.commands
+const GLOBAL = 'global'
+/** map of server ID or {@link GLOBAL} to commands body */
+type CommandScopes = Record<string, RESTPutAPIApplicationCommandsJSONBody>
+
+const commands: CommandScopes = { [GLOBAL]: registry.commands, ...registry.guildCommands }
 
 const cmdsPath = "saved_commands.json"
-let oldCommands: RESTPutAPIApplicationCommandsJSONBody = []
+let oldCommands: CommandScopes = {}
 try {
   const file = await readFile(cmdsPath)
-  const contents = file.toString('utf-8')
-  oldCommands = JSON.parse(contents)
+  const contents = JSON.parse(file.toString('utf-8'))
+  // older saves only held the global command list
+  oldCommands = Array.isArray(contents) ? { [GLOBAL]: contents } : contents
 } catch {
   // pass
 }
 
-if (!isDeepStrictEqual(commands, oldCommands)) {
-  const rest = new REST({ version: '10' }).setToken(TOKEN);
+const savedCommands: CommandScopes = { ...oldCommands }
+const rest = new REST({ version: '10' }).setToken(TOKEN);
+// includes old scopes so servers that lost all their commands get cleared
+for (const scope of new Set([...Object.keys(commands), ...Object.keys(oldCommands)])) {
+  const body = commands[scope] ?? []
+  if (isDeepStrictEqual(body, oldCommands[scope] ?? [])) continue
 
   try {
-    await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
-    await writeFile(cmdsPath, JSON.stringify(commands))
+    const route = scope === GLOBAL ? Routes.applicationCommands(CLIENT_ID) : Routes.applicationGuildCommands(CLIENT_ID, scope)
+    await rest.put(route, { body });
+    if (body.length > 0) savedCommands[scope] = body
+    else delete savedCommands[scope]
   } catch (error) {
-    console.error(error);
+    console.error(`Failed to register ${scope} commands:`, error);
   }
 }
+
+if (!isDeepStrictEqual(savedCommands, oldCommands)) await writeFile(cmdsPath, JSON.stringify(savedCommands))
 
 ///////////////////
 ///// STARTUP /////

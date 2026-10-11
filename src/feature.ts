@@ -15,12 +15,18 @@ import {
   type ModalSubmitInteraction,
   type RESTPostAPIApplicationCommandsJSONBody,
 } from 'discord.js'
-import { t, tAll, type MessageKey } from './i18n.js'
+import { t, tAll, type MessageKey, type Vars } from './i18n.js'
+
+/** Returns localized name fields */
+export const localizedName = (key: MessageKey, vars: Vars = {}) => ({
+  name: t([], key, vars),
+  name_localizations: tAll(key, vars),
+})
 
 /** Returns localized description fields */
-export const localizedDescription = (key: MessageKey) => ({
-  description: t([], key),
-  description_localizations: tAll(key),
+export const localizedDescription = (key: MessageKey, vars: Vars = {}) => ({
+  description: t([], key, vars),
+  description_localizations: tAll(key, vars),
 })
 
 export type ChatHandler = (interaction: ChatInputCommandInteraction) => Promise<unknown>
@@ -40,6 +46,11 @@ export type ModalHandler = (interaction: ModalSubmitInteraction, args: string[])
 export interface Feature {
   /** Discord command payloads */
   commands?: RESTPostAPIApplicationCommandsJSONBody[]
+  /**
+   * Discord command payloads only registered in specific servers, keyed by server ID.
+   * Handlers go in the same maps as global commands.
+   */
+  guildCommands?: Record<string, RESTPostAPIApplicationCommandsJSONBody[]>
   /** Subcommands and subcommand groups contributed to `/setup` */
   setup?: (APIApplicationCommandSubcommandOption | APIApplicationCommandSubcommandGroupOption)[]
   /** Handlers for incoming chat commands */
@@ -76,11 +87,15 @@ export class FeatureRegistry {
   private readonly components = new Map<string, ComponentHandler>()
   private readonly modals = new Map<string, ModalHandler>()
   private readonly commandList: RESTPostAPIApplicationCommandsJSONBody[] = []
+  readonly guildCommands: Record<string, RESTPostAPIApplicationCommandsJSONBody[]> = {}
   private readonly setupOptions: NonNullable<Feature['setup']> = []
 
   constructor(private readonly features: Feature[]) {
     for (const feature of features) {
       this.commandList.push(...feature.commands ?? [])
+      for (const [guildId, commands] of Object.entries(feature.guildCommands ?? {})) {
+        (this.guildCommands[guildId] ??= []).push(...commands)
+      }
       this.setupOptions.push(...feature.setup ?? [])
       for (const [key, handler] of Object.entries(feature.chat ?? {})) this.add(this.chat, key, handler)
       for (const [key, handler] of Object.entries(feature.autocomplete ?? {})) this.add(this.autocomplete, key, handler)
@@ -101,7 +116,7 @@ export class FeatureRegistry {
     return [
       ...this.commandList,
       {
-        name: 'setup',
+        ...localizedName('command.setup.name'),
         ...localizedDescription('command.setup.description'),
         type: ApplicationCommandType.ChatInput,
         default_member_permissions: PermissionFlagsBits.ManageGuild.toString(),

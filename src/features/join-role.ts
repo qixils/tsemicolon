@@ -5,7 +5,7 @@ import {
   PermissionFlagsBits,
   type GuildMember,
 } from 'discord.js'
-import { localizedDescription, type Feature } from '../feature.js'
+import { localizedDescription, localizedName, type Feature } from '../feature.js'
 import { t } from '../i18n.js'
 import { getSetting, setSetting } from '../settings.js'
 
@@ -25,12 +25,12 @@ const giveJoinRole = async (member: GuildMember) => {
 export const joinRoleFeature: Feature = {
   setup: [{
     type: ApplicationCommandOptionType.Subcommand,
-    name: 'joinrole',
+    ...localizedName('command.setup.joinrole.name'),
     ...localizedDescription('command.setup.joinrole.description'),
     options: [{
       type: ApplicationCommandOptionType.Role,
-      name: 'role',
-      ...localizedDescription('command.setup.joinrole.option.role'),
+      ...localizedName('command.setup.joinrole.option.role.name'),
+      ...localizedDescription('command.setup.joinrole.option.role.description'),
       required: true,
     }],
   }],

@@ -43,7 +43,7 @@ const update = async (message: Message) => {
       reports.push(block(message.channel, 'npm ci', installed))
     }
     if (installed?.ok !== false) reports.push(block(message.channel, 'npm run build', await step('npm', ['run', 'build'])))
-    reports.push(t([], installed ? 'owner.update.restart_needed_deps' : 'owner.update.restart'))
+    reports.push(t([], installed ? 'owner.update_needed_deps' : 'owner.update'))
   }
 
   for (const content of chunkLines(reports.join('\n'))) {
@@ -57,6 +57,7 @@ export type Shutdown = (reason: string) => Promise<void>
 export const ownerFeature = (shutdown: Shutdown): Feature => ({
   attach(client) {
     client.on(Events.MessageCreate, async message => {
+      if (!OWNER_ID) return
       if (message.channel.type !== ChannelType.DM || message.author.id !== OWNER_ID) return
       const command = message.content.trim().toLowerCase()
       try {

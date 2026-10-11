@@ -16,8 +16,8 @@ import {
   type User,
 } from 'discord.js'
 import { text, withSchema } from '../db.js'
-import { customId, localizedDescription, type Feature } from '../feature.js'
-import { t, type MessageKey } from '../i18n.js'
+import { customId, localizedDescription, localizedName, type Feature } from '../feature.js'
+import { t, type MaybeLocales, type MessageKey } from '../i18n.js'
 import { CUSTOM_EMOJI, UNICODE_EMOJI_SOURCE, emojiKey } from '../util/emoji.js'
 import { starboardsFor } from './starboard.js'
 
@@ -137,7 +137,7 @@ const deleteDraft = (id: number) => {
 }
 
 /** The poll form; `draftId` 0 means a fresh one */
-const pollModal = (draftId = 0, draft?: Draft, locales: (string | null | undefined)[] = []) => {
+const pollModal = (draftId = 0, draft?: Draft, locales: MaybeLocales = []) => {
   const emojis = new TextInputBuilder()
     .setCustomId('emojis')
     .setLabel(t(locales, 'poll.modal.emojis.label'))
@@ -177,7 +177,7 @@ const emojisFor = (guildId: string, { emojis, message }: Draft) => {
 }
 
 /** Posts the poll as its own message and reacts to it, returning how many emojis couldn't be added */
-const postPoll = async (channel: GuildTextBasedChannel, author: User, emojis: string[], content: string, locales: (string | null | undefined)[]) => {
+const postPoll = async (channel: GuildTextBasedChannel, author: User, emojis: string[], content: string, locales: MaybeLocales) => {
   const sendable = channel as GuildTextBasedChannel & SendableChannels // TODO avoid casting
   // the content is user-written, so nobody gets pinged by a poll
   let message: Message = await sendable.send({
@@ -243,7 +243,7 @@ const submitPoll = async (interaction: ModalSubmitInteraction<'cached'>, draftId
 
 export const pollFeature: Feature = {
   commands: [{
-    name: 'poll',
+    ...localizedName('command.poll.name'),
     ...localizedDescription('command.poll.description'),
     type: ApplicationCommandType.ChatInput,
     contexts: [InteractionContextType.Guild],

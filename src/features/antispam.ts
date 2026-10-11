@@ -12,10 +12,10 @@ import {
   escapeMarkdown,
   type Message,
 } from 'discord.js'
-import { customId, localizedDescription, type Feature } from '../feature.js'
+import { customId, localizedDescription, localizedName, type Feature } from '../feature.js'
 import { t } from '../i18n.js'
 import { notifyMuted } from './moderation.js'
-import { clearSetting, getSetting, setSetting, settingChannel } from '../settings.js'
+import { clearSetting, getSetting, setSetting, getSettingChannel } from '../settings.js'
 import { SENDABLE_TEXT_CHANNEL_TYPES, postableChannel, truncate } from '../util/discord.js'
 import { lookupPluralKit } from '../util/pluralkit.js'
 
@@ -55,7 +55,7 @@ const fingerprint = (message: Message<true>): string => {
 }
 
 const alertChannel = (message: Message<true>) =>
-  settingChannel(message.guild, 'antispam_channel') ?? settingChannel(message.guild, 'reports_channel')
+  getSettingChannel(message.guild, 'antispam_channel') ?? getSettingChannel(message.guild, 'reports_channel')
 
 /** Removes a message along with PluralKit's repost of it */
 const purge = async (message: Message<true>) => {
@@ -70,12 +70,16 @@ const punish = async (message: Message<true>, messages: Message<true>[]) => {
   if (!alert) return
   const locales = [message.guild.preferredLocale]
   const { member } = message
-  if (member?.moderatable) {
+  const canMute = member?.moderatable && message.guild.members.me?.permissionsIn(message.channel).has(PermissionFlagsBits.ModerateMembers)
+  const canDelete = message.guild.members.me?.permissionsIn(message.channel).has(PermissionFlagsBits.ManageMessages)
+  if (canMute) {
     const reason = t(locales, 'antispam.reason')
     await member.timeout(TIMEOUT_MILLIS, reason)
     await notifyMuted(member, new Date(Date.now() + TIMEOUT_MILLIS), reason)
   }
-  await Promise.all(messages.map(purge))
+  if (canDelete) {
+    await Promise.all(messages.map(purge)) // TODO: use clear algorithm
+  }
 
   const sample = message.content.trim()
     ? truncate(message.content, 1024)
@@ -92,13 +96,13 @@ const punish = async (message: Message<true>, messages: Message<true>[]) => {
     .setLabel(t(locales, 'antispam.lift'))
 
   await alert.send({
-    content: `@here ${t(locales, member?.moderatable ? 'antispam.alert' : 'antispam.alert_untouchable', {
+    content: `@here ${t(locales, canMute && canDelete ? 'antispam.alert' : 'antispam.alert_untouchable', {
       user: message.author.toString(),
       tag: escapeMarkdown(message.author.tag),
       channel: message.channel.toString(),
     })}`,
     embeds: [embed],
-    components: member?.moderatable ? [new ActionRowBuilder<ButtonBuilder>().addComponents(lift)] : [],
+    components: canMute ? [new ActionRowBuilder<ButtonBuilder>().addComponents(lift)] : [],
     // the alert exists to get moderators' attention
     allowedMentions: { parse: ['everyone'] },
   })
@@ -110,8 +114,7 @@ const onMessage = async (message: Message) => {
 
   const threshold = getSetting(message.guildId, 'antispam_threshold') ?? 0
   if (threshold <= 0) return
-  if (message.member.permissions.has(PermissionFlagsBits.BanMembers)) return
-  if (!message.guild.members.me?.permissions.has([PermissionFlagsBits.ModerateMembers, PermissionFlagsBits.ManageMessages])) return
+  // if (!message.guild.members.me?.permissions.has([PermissionFlagsBits.ModerateMembers, PermissionFlagsBits.ManageMessages])) return
   if (!alertChannel(message)) return
 
   const print = fingerprint(message)
@@ -134,21 +137,21 @@ const onMessage = async (message: Message) => {
 export const antispamFeature: Feature = {
   setup: [{
     type: ApplicationCommandOptionType.Subcommand,
-    name: 'antispam',
+    ...localizedName('command.setup.antispam.name'),
     ...localizedDescription('command.setup.antispam.description'),
     options: [
       {
         type: ApplicationCommandOptionType.Integer,
-        name: 'threshold',
-        ...localizedDescription('command.setup.antispam.option.threshold'),
+        ...localizedName('command.setup.antispam.option.threshold.name'),
+        ...localizedDescription('command.setup.antispam.option.threshold.description'),
         required: true,
         min_value: 0,
         max_value: 50,
       },
       {
         type: ApplicationCommandOptionType.Channel,
-        name: 'channel',
-        ...localizedDescription('command.setup.antispam.option.channel'),
+        ...localizedName('command.setup.antispam.option.channel.name'),
+        ...localizedDescription('command.setup.antispam.option.channel.description'),
         channel_types: SENDABLE_TEXT_CHANNEL_TYPES,
       },
     ],
@@ -174,7 +177,7 @@ export const antispamFeature: Feature = {
       setSetting(guild.id, 'antispam_threshold', threshold)
       if (channel) setSetting(guild.id, 'antispam_channel', channel.id)
 
-      const destination = settingChannel(guild, 'antispam_channel') ?? settingChannel(guild, 'reports_channel')
+      const destination = getSettingChannel(guild, 'antispam_channel') ?? getSettingChannel(guild, 'reports_channel')
       const lines = [t(locales, 'setup.antispam.done', { count: threshold })]
       lines.push(destination ? t(locales, 'setup.antispam.alerts_to', { channel: destination.toString() }) : t(locales, 'setup.antispam.no_channel'))
       if (!guild.members.me?.permissions.has([PermissionFlagsBits.ModerateMembers, PermissionFlagsBits.ManageMessages])) {

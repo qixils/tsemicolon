@@ -21,9 +21,9 @@ import {
   type PartialUser,
   type User,
 } from 'discord.js'
-import { localizedDescription, type Feature } from '../feature.js'
-import { formatNumber, t } from '../i18n.js'
-import { channelSubcommand, configureChannel, getSetting, setSetting, settingChannel } from '../settings.js'
+import { localizedDescription, localizedName, type Feature } from '../feature.js'
+import { formatNumber, t, type MaybeLocales } from '../i18n.js'
+import { channelSubcommand, configureChannel, getSetting, setSetting, getSettingChannel } from '../settings.js'
 import { recentAuditEntries } from '../util/audit.js'
 import { postBatched } from '../util/batch.js'
 import { displayContent, truncate } from '../util/discord.js'
@@ -43,12 +43,15 @@ const DELETE_AUDIT_AGE_MILLIS = 15 * 60 * 1000
 
 const who = (user: User | PartialUser) => ({ user: user.toString(), tag: escapeMarkdown(user.tag ?? user.id) })
 
-const moderationDetails = (moderator: User | PartialUser | null, reason: string | null, locales: (string | null | undefined)[]) =>
+const moderationDetails = (moderator: User | PartialUser | null, reason: string | null, locales: MaybeLocales) =>
   moderator
     ? t(locales, 'joinlog.details.moderator', { ...who(moderator), reason: reason ?? t(locales, 'common.unavailable') })
     : reason ? t(locales, 'joinlog.details.reason', { reason }) : ''
 
-const joinlog = (guild: Guild) => settingChannel(guild, 'joinlog_channel')
+const joinlog = (guild: Guild) => getSettingChannel(guild, 'joinlog_channel')
+const namelog = (guild: Guild) => getSetting(guild.id, 'namelog_channel')
+  ? getSettingChannel(guild, 'namelog_channel')
+  : joinlog(guild)
 
 const onJoin = async (member: GuildMember) => {
   const channel = joinlog(member.guild)
@@ -148,7 +151,7 @@ const onRoleChange = async (before: GuildMember, after: GuildMember) => {
   const removed = before.roles.cache.filter(role => !after.roles.cache.has(role.id))
   if (added.size === 0 && removed.size === 0) return
 
-  const channel = settingChannel(after.guild, 'rolelog_channel')
+  const channel = getSettingChannel(after.guild, 'rolelog_channel')
   if (!channel) return
   const locales = [after.guild.preferredLocale]
 
@@ -163,7 +166,7 @@ const onRoleChange = async (before: GuildMember, after: GuildMember) => {
 const onUserUpdate = async (client: Client, before: User, after: User) => {
   for (const guild of client.guilds.cache.values()) {
     if (!guild.members.cache.has(after.id)) continue
-    const channel = joinlog(guild)
+    const channel = namelog(guild)
     if (!channel) continue
     const locales = [guild.preferredLocale]
     const lines = [
@@ -191,7 +194,7 @@ const onUserUpdate = async (client: Client, before: User, after: User) => {
 const isIgnored = (guildId: string, userId: string) =>
   (getSetting(guildId, 'messagelog_ignored') ?? []).includes(userId)
 
-const footer = (authorId: string, messageId: string, channelId: string, locales: (string | null | undefined)[]) =>
+const footer = (authorId: string, messageId: string, channelId: string, locales: MaybeLocales) =>
   ({ text: t(locales, 'messagelog.footer', { author: authorId, message: messageId, channel: channelId }) })
 
 const onEdit = async (client: Client, before: Message | PartialMessage, updated: Message | PartialMessage) => {
@@ -203,7 +206,7 @@ const onEdit = async (client: Client, before: Message | PartialMessage, updated:
   if (message.author.id === client.user?.id) return
   if (isIgnored(message.guildId, message.author.id)) return
 
-  const channel = settingChannel(message.guild, 'messagelog_channel', [PermissionFlagsBits.EmbedLinks])
+  const channel = getSettingChannel(message.guild, 'messagelog_channel', [PermissionFlagsBits.EmbedLinks])
   if (!channel) return
   const locales = [message.guild.preferredLocale]
 
@@ -223,7 +226,7 @@ const onEdit = async (client: Client, before: Message | PartialMessage, updated:
   await channel.send({ embeds: [embed] })
 }
 
-const deletionEmbed = (message: Message<true> | PartialMessage, channelName: string, locales: (string | null | undefined)[], deleter?: User | PartialUser) => {
+const deletionEmbed = (message: Message<true> | PartialMessage, channelName: string, locales: MaybeLocales, deleter?: User | PartialUser) => {
   const embed = new EmbedBuilder()
     .setColor(DELETE_COLOR)
     .setTimestamp(SnowflakeUtil.timestampFrom(message.id))
@@ -255,7 +258,7 @@ const onDelete = async (message: Message | PartialMessage) => {
   const fromUser = message.partial || !(message.author.bot || message.webhookId)
   if (fromUser && await isPluralKitOriginal(message.id)) return
 
-  const channel = settingChannel(guild, 'messagelog_channel', [PermissionFlagsBits.EmbedLinks])
+  const channel = getSettingChannel(guild, 'messagelog_channel', [PermissionFlagsBits.EmbedLinks])
   if (!channel) return
 
   let deleter: User | PartialUser | undefined
@@ -273,7 +276,7 @@ const onDelete = async (message: Message | PartialMessage) => {
 const onBulkDelete = async (messages: ReadonlyMap<string, Message | PartialMessage>, guild: Guild | null) => {
   if (!guild) return
   const locales = [guild.preferredLocale]
-  const channel = settingChannel(guild, 'messagelog_channel', [PermissionFlagsBits.EmbedLinks])
+  const channel = getSettingChannel(guild, 'messagelog_channel', [PermissionFlagsBits.EmbedLinks])
   if (!channel) return
 
   const embeds = [...messages.values()]
@@ -295,17 +298,18 @@ const safely = <A extends unknown[]>(name: string, handler: (...args: A) => Prom
 
 export const logsFeature: Feature = {
   setup: [
-    channelSubcommand('joinlog', 'command.setup.joinlog.description'),
-    channelSubcommand('messagelog', 'command.setup.messagelog.description'),
-    channelSubcommand('rolelog', 'command.setup.rolelog.description'),
+    channelSubcommand('command.setup.joinlog.name', 'command.setup.joinlog.description'),
+    channelSubcommand('command.setup.namelog.name', 'command.setup.namelog.description'),
+    channelSubcommand('command.setup.messagelog.name', 'command.setup.messagelog.description'),
+    channelSubcommand('command.setup.rolelog.name', 'command.setup.rolelog.description'),
     {
       type: ApplicationCommandOptionType.Subcommand,
-      name: 'messagelog-ignore',
+      ...localizedName('command.setup.messagelog-ignore.name'),
       ...localizedDescription('command.setup.messagelog-ignore.description'),
       options: [{
         type: ApplicationCommandOptionType.User,
-        name: 'user',
-        ...localizedDescription('command.setup.messagelog-ignore.option.user'),
+        ...localizedName('command.setup.messagelog-ignore.option.user.name'),
+        ...localizedDescription('command.setup.messagelog-ignore.option.user.description'),
         required: true,
       }],
     },
@@ -316,6 +320,13 @@ export const logsFeature: Feature = {
       defaultName: 'semicolon_joins',
       topic: 'setup.joinlog.topic',
       done: 'setup.joinlog.done',
+    }),
+    // TODO: ensure `disable` mentions that this 
+    'setup namelog': configureChannel({
+      setting: 'namelog_channel',
+      defaultName: 'semicolon_names',
+      topic: 'setup.namelog.topic',
+      done: 'setup.namelog.done',
     }),
     'setup messagelog': configureChannel({
       setting: 'messagelog_channel',

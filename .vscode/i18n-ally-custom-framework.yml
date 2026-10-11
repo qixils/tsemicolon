@@ -1,0 +1,14 @@
+# see .vscode/settings.json for locale settings
+
+languageIds:
+  - typescript
+
+# matches any message key passed anywhere around the codebase regardless of function
+usageMatchRegex:
+  - '[''"`]((?:antispam|audit|ban|clear|color|command|common|error|flair|joinlog|joinrole|media|message|messagelog|moderation|mute|owner|pagination|pokemon|poll|remind|report|rolelog|roles|rules|setup|starboard|subscribe)(?:\.[\w-]+)+)(?<!\.(?:js|json|db))[''"`]'
+
+refactorTemplates:
+  - t(locales, '$1')
+  - "'$1'"
+
+monopoly: true
