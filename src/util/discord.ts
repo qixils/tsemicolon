@@ -1,13 +1,14 @@
 import {
   ChannelType,
+  Constants,
   PermissionFlagsBits,
+  SnowflakeUtil,
   type ApplicationCommandOptionAllowedChannelType,
   type EmbedBuilder,
   type Guild,
   type GuildMember,
   type GuildTextBasedChannel,
   type Message,
-  type MessageMentionOptions,
   type PermissionResolvable,
 } from 'discord.js'
 import { t, type MaybeLocales } from '../i18n.js'
@@ -67,6 +68,42 @@ export const postableChannel = (
   if (!channel.permissionsFor(me).has([PermissionFlagsBits.ViewChannel, send, ...extra])) return null
   
   return channel
+}
+
+/**
+ * Deletes messages by ID, returning how many were deleted. Abortable via signal.
+ * Recent messages are bulk deleted, anything older is deleted one at a time.
+ */
+export const deleteMessages = async (channel: GuildTextBasedChannel, ids: readonly string[], signal?: AbortSignal): Promise<number> => {
+  const now = Date.now()
+  const recent: string[] = []
+  const old: string[] = []
+  let deleted = 0
+
+  for (const id of ids) {
+    if (now - SnowflakeUtil.timestampFrom(id) < Constants.MaxBulkDeletableMessageAge) recent.push(id)
+    else old.push(id)
+  }
+
+  // bulk delete API only works in batches of 2-100 and only on recent messages
+  for (let i = 0; i < recent.length; i += 100) {
+    if (signal?.aborted) return deleted
+    const chunk = recent.slice(i, i + 100)
+    if (chunk.length === 1) {
+      await channel.messages.delete(chunk[0]!)
+      deleted++
+    }
+    else deleted += (await channel.bulkDelete(chunk, true)).size
+  }
+
+  // anything older has to be deleted one at a time
+  for (const id of old) {
+    if (signal?.aborted) return deleted
+    await channel.messages.delete(id)
+    deleted++
+  }
+
+  return deleted
 }
 
 const IMAGE = /\.(png|jpe?g|gif|webp)$/i

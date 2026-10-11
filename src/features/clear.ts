@@ -1,44 +1,12 @@
-import { ActionRowBuilder, ApplicationCommandOptionType, ApplicationCommandType, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction, Constants, InteractionContextType, Message, MessageFlags, PermissionFlagsBits, type GuildTextBasedChannel } from "discord.js"
+import { ActionRowBuilder, ApplicationCommandOptionType, ApplicationCommandType, ButtonBuilder, ButtonStyle, ChatInputCommandInteraction, InteractionContextType, Message, MessageFlags, PermissionFlagsBits, type GuildTextBasedChannel } from "discord.js"
 import { customId, localizedDescription, localizedName, type Feature } from "../feature.js"
 import { t } from "../i18n.js"
+import { deleteMessages } from "../util/discord.js"
 
 const NAMESPACE = 'clear'
 
 /** active purges by the ID of the initiating interaction */
 const running = new Map<string, AbortController>()
-
-/** Deletes the given messages, returning how many were deleted. Abortable via signal. */
-const purge = async (channel: GuildTextBasedChannel, msgs: Message[], signal: AbortSignal): Promise<number> => {
-  const now = Date.now()
-  const recent: Message[] = []
-  const old: Message[] = []
-  let deleted = 0
-
-  for (const msg of msgs) {
-    if (now - msg.createdTimestamp < Constants.MaxBulkDeletableMessageAge) recent.push(msg)
-    else old.push(msg)
-  }
-
-  // bulk delete API only works in batches of 2-100 and only on recent messages
-  for (let i = 0; i < recent.length; i += 100) {
-    if (signal.aborted) return deleted
-    const chunk = recent.slice(i, i + 100)
-    if (chunk.length === 1) {
-      await chunk[0]!.delete()
-      deleted++
-    }
-    else deleted += (await channel.bulkDelete(chunk, true)).size
-  }
-
-  // anything older has to be deleted one at a time
-  for (const msg of old) {
-    if (signal.aborted) return deleted
-    await msg.delete()
-    deleted++
-  }
-
-  return deleted
-}
 
 const ensurePurgeableChannel = async (interaction: ChatInputCommandInteraction): Promise<GuildTextBasedChannel | null> => {
   if (!interaction.inGuild() || !interaction.guild?.members?.me || !interaction.channel) {
@@ -126,7 +94,7 @@ const runPurge = async (
     })
 
     const messages = await collect(signal)
-    const deleted = signal.aborted ? 0 : await purge(channel, messages, signal)
+    const deleted = signal.aborted ? 0 : await deleteMessages(channel, messages.map(msg => msg.id), signal)
 
     const content = signal.aborted ? t(locales, 'clear.cancelled', { count: deleted })
       : messages.length === 0 ? t(locales, 'clear.none')

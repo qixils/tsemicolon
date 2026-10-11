@@ -10,13 +10,15 @@ import {
   MessageType,
   PermissionFlagsBits,
   escapeMarkdown,
+  type GuildTextBasedChannel,
   type Message,
 } from 'discord.js'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { customId, localizedDescription, localizedName, type Feature } from '../feature.js'
 import { t } from '../i18n.js'
 import { notifyMuted } from './moderation.js'
 import { clearSetting, getSetting, setSetting, getSettingChannel } from '../settings.js'
-import { SENDABLE_TEXT_CHANNEL_TYPES, postableChannel, truncate } from '../util/discord.js'
+import { SENDABLE_TEXT_CHANNEL_TYPES, deleteMessages, postableChannel, truncate } from '../util/discord.js'
 import { lookupPluralKit } from '../util/pluralkit.js'
 
 const NAMESPACE = 'antispam'
@@ -24,6 +26,8 @@ const NAMESPACE = 'antispam'
 const WINDOW_MILLIS = 20 * 1000
 /** How long to automatically mute for */
 const TIMEOUT_MILLIS = 15 * 60 * 1000
+/** How long PluralKit gets to finish proxying before we look up its reposts */
+const PLURALKIT_SETTLE_MILLIS = 1500
 /** Embed color */
 const ALERT_COLOR = 0xde3d28
 
@@ -40,7 +44,6 @@ const streaks = new Map<string, Streak>()
  * dumping a meme collection all named "untitled" or whatever)
  */
 const fingerprint = (message: Message<true>): string => {
-  // TODO: is there ever a context we want to handle bots?
   if (message.author.bot) return ''
 
   const prefix = `${message.guildId}:${message.author.id}`
@@ -57,12 +60,22 @@ const fingerprint = (message: Message<true>): string => {
 const alertChannel = (message: Message<true>) =>
   getSettingChannel(message.guild, 'antispam_channel') ?? getSettingChannel(message.guild, 'reports_channel')
 
-/** Removes a message along with PluralKit's repost of it */
-const purge = async (message: Message<true>) => {
-  await message.delete().catch(() => {})
-  // TODO: sleep?
-  const proxy = await lookupPluralKit(message.id)
-  if (proxy?.original === message.id) await message.channel.messages.delete(proxy.id).catch(() => {})
+/** Removes messages along with PluralKit's reposts of them */
+const purge = async (messages: Message<true>[]) => {
+  // the newest message may not have been proxied yet, which would leave its repost behind
+  await sleep(PLURALKIT_SETTLE_MILLIS)
+  const proxies = await Promise.all(messages.map(message => lookupPluralKit(message.id)))
+
+  // a streak can span channels
+  const byChannel = new Map<string, { channel: GuildTextBasedChannel, ids: Set<string> }>()
+  messages.forEach((message, index) => {
+    const batch = byChannel.get(message.channelId) ?? { channel: message.channel, ids: new Set<string>() }
+    batch.ids.add(message.id)
+    const proxy = proxies[index]
+    if (proxy?.original === message.id) batch.ids.add(proxy.id)
+    byChannel.set(message.channelId, batch)
+  })
+  await Promise.all([...byChannel.values()].map(({ channel, ids }) => deleteMessages(channel, [...ids]).catch(() => {})))
 }
 
 const punish = async (message: Message<true>, messages: Message<true>[]) => {
@@ -72,13 +85,16 @@ const punish = async (message: Message<true>, messages: Message<true>[]) => {
   const { member } = message
   const canMute = member?.moderatable && message.guild.members.me?.permissionsIn(message.channel).has(PermissionFlagsBits.ModerateMembers)
   const canDelete = message.guild.members.me?.permissionsIn(message.channel).has(PermissionFlagsBits.ManageMessages)
+
+  let promises: Promise<any>[] = []
+
   if (canMute) {
     const reason = t(locales, 'antispam.reason')
-    await member.timeout(TIMEOUT_MILLIS, reason)
-    await notifyMuted(member, new Date(Date.now() + TIMEOUT_MILLIS), reason)
+    promises.push(member.timeout(TIMEOUT_MILLIS, reason))
+    promises.push(notifyMuted(member, new Date(Date.now() + TIMEOUT_MILLIS), reason))
   }
   if (canDelete) {
-    await Promise.all(messages.map(purge)) // TODO: use clear algorithm
+    promises.push(purge(messages))
   }
 
   const sample = message.content.trim()
@@ -95,7 +111,7 @@ const punish = async (message: Message<true>, messages: Message<true>[]) => {
     .setStyle(ButtonStyle.Secondary)
     .setLabel(t(locales, 'antispam.lift'))
 
-  await alert.send({
+  promises.push(alert.send({
     content: `@here ${t(locales, canMute && canDelete ? 'antispam.alert' : 'antispam.alert_untouchable', {
       user: message.author.toString(),
       tag: escapeMarkdown(message.author.tag),
@@ -105,7 +121,9 @@ const punish = async (message: Message<true>, messages: Message<true>[]) => {
     components: canMute ? [new ActionRowBuilder<ButtonBuilder>().addComponents(lift)] : [],
     // the alert exists to get moderators' attention
     allowedMentions: { parse: ['everyone'] },
-  })
+  }))
+
+  await Promise.allSettled(promises)
 }
 
 const onMessage = async (message: Message) => {

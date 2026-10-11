@@ -186,7 +186,7 @@ export const moderationFeature: Feature = {
       if (!outranks(interaction.member, target)) return fail(interaction, 'moderation.hierarchy')
 
       const input = interaction.options.getString('duration', true)
-      const until = parseWhen(input)
+      const until = parseWhen(input, locales)
       if (!until) return fail(interaction, 'mute.unparseable', { input: truncate(input, 100) })
       const duration = until.getTime() - Date.now()
       if (duration <= 0) return fail(interaction, 'mute.in_past')

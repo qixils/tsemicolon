@@ -196,7 +196,8 @@ const onButton = async (interaction: ButtonInteraction, action: string, reminder
       // after a deferred update, the "original" response is the message the button is on
       await interaction.deferUpdate()
       await interaction.deleteReply().catch(() => interaction.message.delete())
-      setHidden(reminder.id) // TODO: verify that this shows what one might expect
+      // the announcement is gone, so neither this reminder nor any joined ones should link back to it
+      db().prepare('UPDATE reminders SET message_id = NULL, hidden = 1 WHERE id = ? OR parent_id = ?').run(reminder.id, reminder.id)
       const pending = reminder.status === 'pending'
       await interaction.followUp({
         content: pending ? announcement(reminder, locales) : t(locales, 'remind.hidden'),
@@ -204,6 +205,11 @@ const onButton = async (interaction: ButtonInteraction, action: string, reminder
         flags: MessageFlags.Ephemeral,
       })
       return
+    }
+
+    case 'show': {
+      if (!isOwner) return ephemeral(t(locales, 'remind.owner_only'))
+      return ephemeral(delivery(reminder, locales))
     }
   }
 }
@@ -213,14 +219,19 @@ const jumpLink = (reminder: Reminder) =>
     ? `https://discord.com/channels/${reminder.guildId ?? '@me'}/${reminder.channelId}/${reminder.messageId}`
     : null
 
-const deliver = async (client: Client, reminder: Reminder): Promise<boolean> => {
-  const guild = reminder.guildId ? client.guilds.cache.get(reminder.guildId) : undefined
-  const locales = [reminder.locale, guild?.preferredLocale]
+/** The message reminding the user */
+const delivery = (reminder: Reminder, locales: MaybeLocales) => {
   const link = jumpLink(reminder)
-  const content = [
+  return [
     t(locales, 'remind.delivery', { created: time(new Date(reminder.createdAt), TimestampStyles.RelativeTime), text: quote(reminder.content) }),
     ...(link ? [link] : []),
   ].join('\n')
+}
+
+const deliver = async (client: Client, reminder: Reminder): Promise<boolean> => {
+  const guild = reminder.guildId ? client.guilds.cache.get(reminder.guildId) : undefined
+  const locales = [reminder.locale, guild?.preferredLocale]
+  const content = delivery(reminder, locales)
 
   try {
     const user = await client.users.fetch(reminder.userId)
@@ -232,15 +243,23 @@ const deliver = async (client: Client, reminder: Reminder): Promise<boolean> => 
   } catch {
   }
 
-  // DMs closed, we can fall back to the channel it was set in?
+  // DMs closed, we can fall back to the channel it was set in
 
   if (!reminder.channelId) return false
-  if (reminder.hidden) return false
 
   const channel = await client.channels.fetch(reminder.channelId).catch(() => null)
   if (!channel?.isSendable()) return false
 
-  const sent = await channel.send({ content: `<@${reminder.userId}> ${content}`, allowedMentions: { users: [reminder.userId] } })
+  const mention = `<@${reminder.userId}>`
+  const allowedMentions = { users: [reminder.userId] }
+  // hidden reminders only announce that they're due, the owner can reveal the content to themself
+  const sent = await channel.send(reminder.hidden
+    ? {
+        content: t(locales, 'remind.delivery_hidden', { user: mention }),
+        components: [new ActionRowBuilder<ButtonBuilder>().addComponents(button('show', reminder.id, '👀', t(locales, 'remind.button.show')))],
+        allowedMentions,
+      }
+    : { content: `${mention} ${content}`, allowedMentions })
   if (sent) {
     setStatus(reminder.id, 'sent')
     return true
@@ -316,7 +335,7 @@ export const remindersFeature: Feature = {
       const ephemeral = _hidden && interaction.inGuild()
       const unjoinable = _hidden || !interaction.inGuild()
 
-      const at = parseWhen(input)
+      const at = parseWhen(input, locales)
       if (!at) {
         await interaction.reply({ content: t(locales, 'remind.unparseable', { input: truncate(input, 100) }), flags: MessageFlags.Ephemeral })
         return

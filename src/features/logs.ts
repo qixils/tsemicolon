@@ -321,7 +321,6 @@ export const logsFeature: Feature = {
       topic: 'setup.joinlog.topic',
       done: 'setup.joinlog.done',
     }),
-    // TODO: ensure `disable` mentions that this 
     'setup namelog': configureChannel({
       setting: 'namelog_channel',
       defaultName: 'semicolon_names',

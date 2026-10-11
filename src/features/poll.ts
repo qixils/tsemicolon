@@ -101,9 +101,9 @@ const LEADING_EMOJI = new RegExp(`^(?:${CUSTOM_EMOJI.source}|${UNICODE_EMOJI_SOU
 export const parseLines = (text: string): string[] =>
   text.split('\n').flatMap(line => LEADING_EMOJI.exec(line.trimStart())?.[0] ?? [])
 
-const canPoll = (channel: GuildTextBasedChannel) => {
+const canPoll = (channel: GuildTextBasedChannel): channel is GuildTextBasedChannel & SendableChannels => {
   const me = channel.guild.members.me
-  if (!me) return false
+  if (!me || !channel.isSendable()) return false
   const send = channel.isThread() ? PermissionFlagsBits.SendMessagesInThreads : PermissionFlagsBits.SendMessages
   return channel.permissionsFor(me).has([
     PermissionFlagsBits.ViewChannel, send, PermissionFlagsBits.AddReactions, PermissionFlagsBits.ReadMessageHistory,
@@ -115,9 +115,13 @@ interface Draft {
   message: string
 }
 
+const pruneDrafts = () => {
+  db().prepare('DELETE FROM poll_drafts WHERE created_at < ?').run(Date.now() - DRAFT_LIFETIME)
+}
+
 /** Saves (or updates) a rejected poll, returning its ID */
 const saveDraft = (existingId: number, userId: string, draft: Draft): number => {
-  db().prepare('DELETE FROM poll_drafts WHERE created_at < ?').run(Date.now() - DRAFT_LIFETIME)
+  pruneDrafts()
   const updated = db().prepare('UPDATE poll_drafts SET emojis = ?, message = ?, created_at = ? WHERE id = ? AND user_id = ?')
     .run(draft.emojis, draft.message, Date.now(), existingId, userId)
   if (Number(updated.changes) > 0) return existingId
@@ -177,10 +181,9 @@ const emojisFor = (guildId: string, { emojis, message }: Draft) => {
 }
 
 /** Posts the poll as its own message and reacts to it, returning how many emojis couldn't be added */
-const postPoll = async (channel: GuildTextBasedChannel, author: User, emojis: string[], content: string, locales: MaybeLocales) => {
-  const sendable = channel as GuildTextBasedChannel & SendableChannels // TODO avoid casting
+const postPoll = async (channel: GuildTextBasedChannel & SendableChannels, author: User, emojis: string[], content: string, locales: MaybeLocales) => {
   // the content is user-written, so nobody gets pinged by a poll
-  let message: Message = await sendable.send({
+  let message: Message = await channel.send({
     content: t(locales, 'poll.message', { user: author.toString(), content }),
   })
 
@@ -190,7 +193,7 @@ const postPoll = async (channel: GuildTextBasedChannel, author: User, emojis: st
   for (const emoji of emojis) {
     if (added === REACTIONS_PER_MESSAGE) {
       if (messages === MAX_MESSAGES) break
-      message = await sendable.send({ content: '** **' })
+      message = await channel.send({ content: '** **' })
       messages++
       added = 0
     }
@@ -277,6 +280,10 @@ export const pollFeature: Feature = {
       if (action !== 'submit' || !interaction.inCachedGuild()) return
       await submitPoll(interaction, Number(id))
     },
+  },
+  attach() {
+    // drafts hold what users wrote, so don't keep them past their lifetime just because nobody has saved another
+    setInterval(pruneDrafts, 60 * 60 * 1000).unref()
   },
   forgetUser: userId => Number(db().prepare('DELETE FROM poll_drafts WHERE user_id = ?').run(userId).changes),
 }

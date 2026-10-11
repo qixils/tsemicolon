@@ -57,6 +57,9 @@ export const t = (locales: MaybeLocales, key: MessageKey, vars: Vars = {}): stri
 export const tAll = (key: MessageKey, vars: Vars = {}): Partial<Record<Locale, string>> =>
   Object.fromEntries(allLocales.map(locale => [locale, t([locale], key, vars)]))
 
+/** Returns whether the provided locale is available */
+export const isSupportedLocale = (locale: string) => verifyLocales(locale).length > 0
+
 /** Returns a non-empty array of all valid input locales with the default */
 export const resolveLocales = (locales: MaybeLocales): Locale[] => [...verifyLocales(locales), DEFAULT_LOCALE]
 

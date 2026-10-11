@@ -15,8 +15,11 @@ export interface Sprite {
   name: string
 }
 
-/** sprites we've already looked for and failed to find */
-const missing = new Set<string>()
+/** How long until a sprite that couldn't be found is looked for again */
+const RETRY_MISSING_MILLIS = 60 * 60 * 1000
+
+/** when we last looked for and failed to find each sprite */
+const missing = new Map<string, number>()
 const inFlight = new Map<string, Promise<Sprite | null>>()
 
 const usesFemaleSprite = (entry: PokemonEntry, variant: Variant) =>
@@ -99,7 +102,11 @@ const download = async (urls: string[]): Promise<Buffer | null> => {
  */
 export const getSprite = async (entry: PokemonEntry, variant: Variant): Promise<Sprite | null> => {
   const name = cacheName(entry, variant)
-  if (missing.has(name)) return null
+  const missedAt = missing.get(name)
+  if (missedAt !== undefined) {
+    if (Date.now() - missedAt < RETRY_MISSING_MILLIS) return null
+    missing.delete(name)
+  }
 
   const path = join(SPRITE_CACHE_DIR, name)
   if (await access(path).then(() => true, () => false)) return { path, name }
@@ -110,7 +117,7 @@ export const getSprite = async (entry: PokemonEntry, variant: Variant): Promise<
   const work = (async (): Promise<Sprite | null> => {
     const raw = await download(spriteUrls(entry, variant))
     if (!raw) {
-      missing.add(name)
+      missing.set(name, Date.now())
       return null
     }
     try {

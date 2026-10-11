@@ -3,6 +3,8 @@ import {
   ApplicationCommandType,
   InteractionContextType,
   MessageFlags,
+  TimestampStyles,
+  time,
   type AutocompleteInteraction,
   type ChatInputCommandInteraction,
 } from 'discord.js'
@@ -20,6 +22,11 @@ const db = withSchema(`
   );
   CREATE INDEX IF NOT EXISTS rules_by_guild ON rules (guild_id, id);
 `)
+
+/** How long someone has to wait between shares */
+const SHARE_COOLDOWN_MILLIS = 60 * 1000
+/** When each `guild:user` last shared a rule */
+const lastShared = new Map<string, number>()
 
 export interface Rule {
   id: number
@@ -52,19 +59,19 @@ const replyInChunks = async (interaction: ChatInputCommandInteraction, content: 
 }
 
 /** autocompletes rules by contents or index */
-const suggestRules = (asString: boolean) => async (interaction: AutocompleteInteraction) => {
+const suggestRules = async (interaction: AutocompleteInteraction) => {
   if (!interaction.guildId) return
   const query = String(interaction.options.getFocused()).trim().toLowerCase()
   const choices = listRules(interaction.guildId)
     .filter(rule => !query || String(rule.number).startsWith(query) || rule.text.toLowerCase().includes(query))
     .slice(0, 25)
-    .map(rule => ({ name: truncate(`${rule.number}. ${rule.text}`, 100), value: asString ? String(rule.number) : rule.number }))
+    .map(rule => ({ name: truncate(`${rule.number}. ${rule.text}`, 100), value: rule.number }))
   await interaction.respond(choices)
 }
 
 /** fetches a rule from an index */
-const pickRule = async (interaction: ChatInputCommandInteraction<'cached'>): Promise<Rule | undefined> => {
-  const number = interaction.options.getInteger('number', true)
+const pickRule = async (interaction: ChatInputCommandInteraction<'cached'>, option = 'number'): Promise<Rule | undefined> => {
+  const number = interaction.options.getInteger(option, true)
   const rule = listRules(interaction.guildId)[number - 1]
   if (!rule) await interaction.reply({ content: t([interaction.locale, interaction.guildLocale], 'rules.missing', { number }), flags: MessageFlags.Ephemeral })
   return rule
@@ -81,16 +88,23 @@ const numberOption = {
 
 export const rulesFeature: Feature = {
   commands: [{
-    ...localizedName('command.rules.name'),
-    ...localizedDescription('command.rules.description'),
+    ...localizedName('command.share.name'),
+    ...localizedDescription('command.share.description'),
     type: ApplicationCommandType.ChatInput,
     contexts: [InteractionContextType.Guild],
-    options: [{
-      type: ApplicationCommandOptionType.String,
-      ...localizedName('command.rules.option.rule.name'),
-      ...localizedDescription('command.rules.option.rule.description'),
-      autocomplete: true,
-    }],
+    options: [
+      {
+        ...numberOption,
+        ...localizedName('command.share.option.rule.name'),
+        ...localizedDescription('command.share.option.rule.description'),
+      },
+      {
+        type: ApplicationCommandOptionType.User,
+        ...localizedName('command.share.option.user.name'),
+        ...localizedDescription('command.share.option.user.description'),
+        required: true,
+      },
+    ],
   }],
   setup: [{
     type: ApplicationCommandOptionType.SubcommandGroup,
@@ -149,37 +163,31 @@ export const rulesFeature: Feature = {
     ],
   }],
   chat: {
-    rules: async interaction => {
+    share: async interaction => {
       if (!interaction.inCachedGuild()) return
       const locales = [interaction.locale, interaction.guildLocale]
-      const rules = listRules(interaction.guildId)
-      if (rules.length === 0) {
-        await interaction.reply({ content: t(locales, 'rules.none'), flags: MessageFlags.Ephemeral })
+      const key = `${interaction.guildId}:${interaction.user.id}`
+      const last = lastShared.get(key)
+      if (last !== undefined && Date.now() - last < SHARE_COOLDOWN_MILLIS) {
+        const relative = time(new Date(last + SHARE_COOLDOWN_MILLIS), TimestampStyles.RelativeTime)
+        await interaction.reply({ content: t(locales, 'rules.share_cooldown', { relative }), flags: MessageFlags.Ephemeral })
         return
       }
 
-      const query = interaction.options.getString('rule')?.trim()
-      if (!query) {
-        await replyInChunks(interaction, [...rules.map(rule => formatRule(rule)), t(locales, 'rules.disclaimer')].join('\n'), true)
-        return
-      }
+      const rule = await pickRule(interaction, 'rule')
+      if (!rule) return
+      const target = interaction.options.getUser('user', true)
 
-      if (/^\d+$/.test(query)) {
-        const rule = rules[Number(query) - 1]
-        // intentionally non-ephemeral so you can use this to quickly point others to a specific rule
-        if (rule) await interaction.reply({ content: formatRule(rule) })
-        else await interaction.reply({ content: t(locales, 'rules.missing', { number: query }), flags: MessageFlags.Ephemeral })
-        return
-      }
+      const now = Date.now()
+      lastShared.set(key, now)
+      setTimeout(() => { if (lastShared.get(key) === now) lastShared.delete(key) }, SHARE_COOLDOWN_MILLIS).unref()
 
-      const matches = rules.filter(rule => rule.text.toLowerCase().includes(query.toLowerCase()))
-      if (matches.length === 0) {
-        await interaction.reply({ content: t(locales, 'rules.no_match', { query: truncate(query, 100) }), flags: MessageFlags.Ephemeral })
-        return
-      }
-
-      // intentionally non-ephemeral so you can use this to quickly point others to a specific rule or rules
-      await replyInChunks(interaction, matches.map(rule => formatRule(rule)).join('\n'))
+      await interaction.reply({
+        content: t([interaction.guildLocale], 'rules.share', { user: target.toString(), rule: formatRule(rule), requester: interaction.user.toString() }),
+        // the target sees the mention without a push notification, in case someone uses this to harass them
+        flags: MessageFlags.SuppressNotifications,
+        allowedMentions: { users: [target.id] },
+      })
     },
     'setup rules add': async interaction => {
       if (!interaction.inCachedGuild()) return
@@ -232,10 +240,10 @@ export const rulesFeature: Feature = {
     },
   },
   autocomplete: {
-    'rules': suggestRules(true), // TODO is this weird, showing the rules in the autocomplete of a search command?
-    'setup rules edit': suggestRules(false),
-    'setup rules remove': suggestRules(false),
-    'setup rules ping': suggestRules(false),
+    'share': suggestRules,
+    'setup rules edit': suggestRules,
+    'setup rules remove': suggestRules,
+    'setup rules ping': suggestRules,
   },
   forgetGuild: guildId => Number(db().prepare('DELETE FROM rules WHERE guild_id = ?').run(guildId).changes),
 }

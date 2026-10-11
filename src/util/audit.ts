@@ -11,7 +11,6 @@ interface CacheObj<T extends AuditLogEvent = AuditLogEvent> {
   entries: Promise<GuildAuditLogsEntry<T>[]>
 }
 
-// TODO: cleanup cache task?
 const cache = new Map<string, CacheObj>()
 
 /**
@@ -25,13 +24,16 @@ export const recentAuditEntries = async <T extends AuditLogEvent>(guild: Guild, 
   const key = `${guild.id}:${type}`
   let cached = cache.get(key) as CacheObj<T> | undefined
   if (!cached || Date.now() - cached.at > REUSE_WINDOW) {
-    cached = {
+    const fresh: CacheObj<T> = {
       at: Date.now(),
       entries: guild.fetchAuditLogs<T>({ type, limit: 50 })
         .then(logs => [...logs.entries.values()] as GuildAuditLogsEntry<T>[])
         .catch(() => []),
     }
-    cache.set(key, cached)
+    cache.set(key, fresh)
+    // forget it once it can no longer be reused
+    setTimeout(() => { if (cache.get(key) === fresh) cache.delete(key) }, REUSE_WINDOW).unref()
+    cached = fresh
   }
 
   const entries = await cached.entries

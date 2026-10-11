@@ -511,32 +511,29 @@ export const starboardFeature: Feature = {
 
       const locales = [interaction.locale, interaction.guildLocale]
 
+      // every outcome replaces the prompt, so its buttons can't be pressed twice
       switch (action) {
         case 'confirm_delete':
           if (Temporal.Duration.compare(interaction.message.createdAt.toTemporalInstant().until(Temporal.Now.instant()), Temporal.Duration.from({ hours: 1 })) > -1) {
-            await interaction.reply({
-              content: t(locales, 'starboard.expired'),
-              flags: MessageFlags.Ephemeral,
-            })
+            await interaction.update({ content: t(locales, 'starboard.expired'), components: [] })
             return
           }
           const id = Number(args[0])
           if (!args.length || !Number.isFinite(id)) {
-            await interaction.reply({
-              content: t(locales, 'starboard.not_found'),
-              flags: MessageFlags.Ephemeral,
-            })
+            await interaction.update({ content: t(locales, 'starboard.not_found'), components: [] })
             return
           }
           // sql auto deletes posts
           const removed = db().prepare('DELETE FROM starboards WHERE guild_id = ? AND id = ?').run(interaction.guildId, id)
-          await interaction.reply({
+          await interaction.update({
             content: t(locales, Number(removed.changes) > 0 ? 'starboard.removed' : 'starboard.not_found'),
-            flags: MessageFlags.Ephemeral,
+            components: [],
           })
           return
         case 'cancel_delete':
-          await interaction.message.delete() // TODO: is this the correct method? what about deleteReply?
+          // after a deferred update, the "original" response is the message the button is on
+          await interaction.deferUpdate()
+          await interaction.deleteReply()
       }
     },
   },
