@@ -62,7 +62,8 @@ const shutdown = async (reason: string) => {
   process.exit(0)
 }
 
-const registry = new FeatureRegistry([
+// annotated since the owner feature refers back to it
+const registry: FeatureRegistry = new FeatureRegistry([
   clearFeature,
   pokemonFeature,
   settingsFeature,
@@ -78,7 +79,10 @@ const registry = new FeatureRegistry([
   rolesFeature,
   subscriptionsFeature,
   ...(OWNER_ID === '140564059417346049' ? [htstemFeature] : []),
-  ownerFeature(shutdown),
+  ownerFeature(shutdown, {
+    guild: (id, client) => registry.forgetGuild(id, client),
+    user: (id, client) => registry.forgetUser(id, client),
+  }),
 ])
 
 ////////////////////

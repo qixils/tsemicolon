@@ -422,6 +422,8 @@
   "owner.logout": "Logging out…",
   "owner.update": "Successfully updated.",
   "owner.update_needed_deps": "Successfully updated and pulled dependencies. Reboot suggested.",
+  "owner.forget.invalid_id": "Please provide a valid ID.",
+  "owner.forget.done": { "one": "Deleted {count} record about `{id}`.", "other": "Deleted {count} records about `{id}`." },
 
   "pokemon.search.types": "Types",
   "pokemon.search.stats": "Stats",

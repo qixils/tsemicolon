@@ -3,6 +3,7 @@ import {
   ApplicationCommandType,
   ChannelType,
   EmbedBuilder,
+  Events,
   InteractionContextType,
   MessageFlags,
   PermissionFlagsBits,
@@ -379,5 +380,13 @@ export const subscriptionsFeature: Feature = {
       if (client.isReady()) poll(client).catch(error => console.error('Subscription poll failed:', error))
     }
     setInterval(run, POLL_INTERVAL).unref()
+
+    client.on(Events.ChannelDelete, channel => {
+      if (!channel.isDMBased()) db().prepare('DELETE FROM subscriptions WHERE guild_id = ? AND channel_id = ?').run(channel.guildId, channel.id)
+    })
+    client.on(Events.GuildRoleDelete, role => {
+      db().prepare('UPDATE subscriptions SET ping_role_id = NULL WHERE guild_id = ? AND ping_role_id = ?').run(role.guild.id, role.id)
+    })
   },
+  forgetGuild: guildId => Number(db().prepare('DELETE FROM subscriptions WHERE guild_id = ?').run(guildId).changes),
 }

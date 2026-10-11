@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { ChannelType, Events, type Message, type TextBasedChannel } from 'discord.js'
+import { ChannelType, Events, type Client, type Message, type TextBasedChannel } from 'discord.js'
 import { OWNER_ID } from '../config.js'
 import type { Feature } from '../feature.js'
 import { t } from '../i18n.js'
-import { chunkLines } from '../util/discord.js'
+import { chunkLines, parseSnowflake } from '../util/discord.js'
 import { botEmoji } from '../util/emoji.js'
 
 const run = promisify(execFile)
@@ -54,20 +54,35 @@ const update = async (message: Message) => {
 /** function to gracefully exit the bot's process */
 export type Shutdown = (reason: string) => Promise<void>
 
-export const ownerFeature = (shutdown: Shutdown): Feature => ({
+/** functions to delete stored data, returning how many records were removed */
+export interface Forget {
+  guild(guildId: string, client: Client): Promise<number>
+  user(userId: string, client: Client): Promise<number>
+}
+
+export const ownerFeature = (shutdown: Shutdown, forget: Forget): Feature => ({
   attach(client) {
     client.on(Events.MessageCreate, async message => {
       if (!OWNER_ID) return
       if (message.channel.type !== ChannelType.DM || message.author.id !== OWNER_ID) return
-      const command = message.content.trim().toLowerCase()
+      const [command = '', arg = ''] = message.content.trim().toLowerCase().split(/\s+/)
       try {
         if (command === 'logout') {
           await message.reply({ content: t([], 'owner.logout') })
           await shutdown('logout command invoked')
         } else if (command === 'update') {
           await update(message)
+        } else if (command === 'forget-guild' || command === 'forget-user') {
+          // data deletion requests
+          const id = parseSnowflake(arg)
+          if (!id) {
+            await message.reply({ content: t([], 'owner.forget.invalid_id') })
+            return
+          }
+          const count = command === 'forget-guild' ? await forget.guild(id, message.client) : await forget.user(id, message.client)
+          await message.reply({ content: t([], 'owner.forget.done', { count, id }) })
         } else if (command === 'help') {
-          await message.reply({ content: '`logout`, `update`' })
+          await message.reply({ content: '`logout`, `update`, `forget-guild <id>`, `forget-user <id>`' })
         }
       } catch (error) {
         console.error(`Owner command "${command}" failed:`, error)

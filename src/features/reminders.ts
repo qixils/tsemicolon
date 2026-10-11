@@ -365,4 +365,5 @@ export const remindersFeature: Feature = {
       if (client.isReady()) tick(client).catch(error => console.error('Reminder tick failed:', error))
     }, TICK).unref()
   },
+  forgetUser: userId => Number(db().prepare('DELETE FROM reminders WHERE user_id = ?').run(userId).changes),
 }

@@ -65,6 +65,10 @@ export interface Feature {
   modals?: Record<string, ModalHandler>
   /** Hooks up event listeners and timers. Called once, before login. */
   attach?(client: Client): void
+  /** Deletes everything stored about a server. Resolves to how many records were removed. */
+  forgetGuild?(guildId: string, client: Client): number | Promise<number>
+  /** Deletes everything stored about a user. Resolves to how many records were removed. */
+  forgetUser?(userId: string, client: Client): number | Promise<number>
 }
 
 const SEPARATOR = ':'
@@ -131,6 +135,20 @@ export class FeatureRegistry {
 
   attach(client: Client) {
     for (const feature of this.features) feature.attach?.(client)
+  }
+
+  /** Deletes everything any feature stored about a server, returning how many records were removed */
+  async forgetGuild(guildId: string, client: Client) {
+    let removed = 0
+    for (const feature of this.features) removed += await feature.forgetGuild?.(guildId, client) ?? 0
+    return removed
+  }
+
+  /** Deletes everything any feature stored about a user, returning how many records were removed */
+  async forgetUser(userId: string, client: Client) {
+    let removed = 0
+    for (const feature of this.features) removed += await feature.forgetUser?.(userId, client) ?? 0
+    return removed
   }
 
   async dispatch(interaction: Interaction) {

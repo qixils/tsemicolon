@@ -34,7 +34,8 @@ const db = withSchema(`
     emoji             TEXT    NOT NULL,
     threshold         INTEGER NOT NULL,
     legacy            INTEGER NOT NULL DEFAULT 0,
-    legacy_thresholds TEXT
+    legacy_thresholds TEXT,
+    legacy_emojis     TEXT
   );
   CREATE INDEX IF NOT EXISTS starboards_by_guild ON starboards (guild_id);
 
@@ -44,6 +45,7 @@ const db = withSchema(`
     post_id      TEXT    NOT NULL,
     PRIMARY KEY (starboard_id, message_id)
   ) WITHOUT ROWID;
+  CREATE INDEX IF NOT EXISTS starboard_posts_by_post ON starboard_posts (starboard_id, post_id);
 
   -- the old db had one starboard per server and didn't record which server a
   -- post belonged to; these get claimed by that server's legacy starboard on use
@@ -71,10 +73,16 @@ export interface Starboard {
    * Maps the cutoff time as a snowflake to the old threshold for messages before it.
    */
   legacyThresholds: Record<string, number> | null
+  /**
+   * Emojis this starboard used before its current one.
+   * They still count towards it, so changing the emoji doesn't strand old posts.
+   */
+  legacyEmojis: string[]
 }
 
 const toStarboard = (row: Row): Starboard => {
   const thresholds = optionalText(row, 'legacy_thresholds')
+  const emojis = optionalText(row, 'legacy_emojis')
   return typia.assert<Starboard>({
     id: int(row, 'id'),
     guildId: text(row, 'guild_id'),
@@ -83,8 +91,12 @@ const toStarboard = (row: Row): Starboard => {
     threshold: int(row, 'threshold'),
     legacy: int(row, 'legacy') === 1,
     legacyThresholds: thresholds ? JSON.parse(thresholds) : null,
+    legacyEmojis: emojis ? JSON.parse(emojis) : [],
   })
 }
+
+/** Keys of every emoji that counts towards this starboard */
+export const boardEmojiKeys = (board: Starboard) => new Set([board.emoji, ...board.legacyEmojis].map(emojiKey))
 
 export const starboardsFor = (guildId: string): Starboard[] =>
   db().prepare('SELECT * FROM starboards WHERE guild_id = ? ORDER BY id').all(guildId).map(toStarboard)
@@ -96,11 +108,12 @@ const getStarboard = (guildId: string, id: number): Starboard | undefined => {
 
 export const createStarboard = (board: Omit<Starboard, 'id'>): number => {
   const result = db().prepare(`
-    INSERT INTO starboards (guild_id, channel_id, emoji, threshold, legacy, legacy_thresholds)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO starboards (guild_id, channel_id, emoji, threshold, legacy, legacy_thresholds, legacy_emojis)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     board.guildId, board.channelId, board.emoji, board.threshold,
     board.legacy ? 1 : 0, board.legacyThresholds ? JSON.stringify(board.legacyThresholds) : null,
+    board.legacyEmojis.length ? JSON.stringify(board.legacyEmojis) : null,
   )
   return Number(result.lastInsertRowid)
 }
@@ -191,20 +204,21 @@ const buildPost = (board: Starboard, message: Message<true>, count: number) => {
   }
 }
 
-/** Counts reactions on the provided message of the provided kind, ignoring the author and bots */
-const countReactions = async (message: Message, key: string) => {
-  const reaction = message.reactions.cache.find(reaction => reactionKey(reaction.emoji) === key)
-  if (!reaction) return 0
+/** Counts the users who reacted to the provided message with any of the provided keys, ignoring the author and bots */
+const countReactions = async (message: Message, keys: ReadonlySet<string>) => {
   const voters = new Set<string>()
-  for (const type of [ReactionType.Normal, ReactionType.Burst]) {
-    let after: string | undefined
-    while (true) {
-      const page = await reaction.users.fetch({ type, limit: 100, ...(after && { after }) })
-      for (const user of page.values()) {
-        if (!user.bot && user.id !== message.author.id) voters.add(user.id)
+  for (const reaction of message.reactions.cache.values()) {
+    if (!keys.has(reactionKey(reaction.emoji))) continue
+    for (const type of [ReactionType.Normal, ReactionType.Burst]) {
+      let after: string | undefined
+      while (true) {
+        const page = await reaction.users.fetch({ type, limit: 100, ...(after && { after }) })
+        for (const user of page.values()) {
+          if (!user.bot && user.id !== message.author.id) voters.add(user.id)
+        }
+        if (page.size < 100) break
+        after = page.lastKey()
       }
-      if (page.size < 100) break
-      after = page.lastKey()
     }
   }
   return voters.size
@@ -247,12 +261,15 @@ const updateBoard = async (board: Starboard, message: Message<true>, count: numb
         await post.delete()
         forgetPost(board, message.id)
       }
+      return
     } catch (error) {
-      // original post got deleted, make a new one
-      if (isMissing(error)) forgetPost(board, message.id)
-      else throw error
+      if (!isMissing(error)) throw error
+      // someone(?) deleted the post..!
+      // anything actually problematic would've had its original deleted too i'd assume,
+      //  so probably a mistake or automod or something,
+      //  so let's clear the old data and try to post it again
+      forgetPost(board, message.id)
     }
-    return
   }
 
   // don't expose age-restricted channels
@@ -265,15 +282,24 @@ const onReaction = async (reaction: MessageReaction | PartialMessageReaction) =>
   const guildId = reaction.message.guildId
   if (!guildId) return
   const key = reactionKey(reaction.emoji)
-  const boards = starboardsFor(guildId).filter(board => emojiKey(board.emoji) === key)
+  const boards = starboardsFor(guildId).filter(board => boardEmojiKeys(board).has(key))
   if (boards.length === 0) return
 
   const message = await reaction.message.fetch().catch(() => null)
   if (!message?.inGuild()) return
-  const count = await countReactions(message, key)
 
   for (const board of boards) {
+    const count = await countReactions(message, boardEmojiKeys(board))
     await withLock(`${board.id}:${message.id}`, () => updateBoard(board, message, count))
+  }
+}
+
+const forgetPosts = (guildId: string, channelId: string, postIds: string[]) => {
+  const boards = starboardsFor(guildId).filter(board => board.channelId === channelId)
+  if (boards.length === 0) return
+  const forget = db().prepare('DELETE FROM starboard_posts WHERE starboard_id = ? AND post_id = ?')
+  for (const board of boards) {
+    for (const postId of postIds) forget.run(board.id, postId)
   }
 }
 
@@ -333,7 +359,7 @@ const readChannel = async (interaction: ChatInputCommandInteraction<'cached'>, r
 
 const duplicateOf = (guildId: string, channelId: string, emoji: string, except?: number) =>
   starboardsFor(guildId).find(board =>
-    board.id !== except && board.channelId === channelId && emojiKey(board.emoji) === emojiKey(emoji))
+    board.id !== except && board.channelId === channelId && boardEmojiKeys(board).has(emojiKey(emoji)))
 
 const channelOption = (required: boolean) => ({
   type: ApplicationCommandOptionType.Channel as const,
@@ -407,7 +433,7 @@ export const starboardFeature: Feature = {
       }
 
       const threshold = interaction.options.getInteger('threshold') ?? DEFAULT_THRESHOLD
-      createStarboard({ guildId: interaction.guildId, channelId: channel.id, emoji, threshold, legacy: false, legacyThresholds: null })
+      createStarboard({ guildId: interaction.guildId, channelId: channel.id, emoji, threshold, legacy: false, legacyThresholds: null, legacyEmojis: [] })
       await interaction.reply({
         content: t(locales, 'starboard.added', { channel: channel.toString(), emoji, threshold }),
         flags: MessageFlags.Ephemeral,
@@ -434,9 +460,14 @@ export const starboardFeature: Feature = {
       const threshold = interaction.options.getInteger('threshold') ?? board.threshold
       // the interaction's snowflake doubles as the cutoff for messages sent before this edit
       const legacyThresholds = nextLegacyThresholds(board, threshold, interaction.id)
+      // the old emoji keeps counting so that existing posts still update
+      const legacyEmojis = emojiKey(emoji) === emojiKey(board.emoji)
+        ? board.legacyEmojis
+        : [...board.legacyEmojis.filter(old => emojiKey(old) !== emojiKey(emoji)), board.emoji]
 
-      db().prepare('UPDATE starboards SET channel_id = ?, emoji = ?, threshold = ?, legacy_thresholds = ? WHERE id = ?')
-        .run(channelId, emoji, threshold, legacyThresholds ? JSON.stringify(legacyThresholds) : null, board.id)
+      db().prepare('UPDATE starboards SET channel_id = ?, emoji = ?, threshold = ?, legacy_thresholds = ?, legacy_emojis = ? WHERE id = ?')
+        .run(channelId, emoji, threshold, legacyThresholds ? JSON.stringify(legacyThresholds) : null,
+          legacyEmojis.length ? JSON.stringify(legacyEmojis) : null, board.id)
       // posts in the old channel can't be edited from the new one
       if (channelId !== board.channelId) db().prepare('DELETE FROM starboard_posts WHERE starboard_id = ?').run(board.id)
 
@@ -519,15 +550,19 @@ export const starboardFeature: Feature = {
       if (!message.guildId) return
       removeFromBoards(message, starboardsFor(message.guildId)).catch(error => console.error('Starboard clear failed:', error))
     })
+    client.on(Events.MessageDelete, message => {
+      if (message.guildId) forgetPosts(message.guildId, message.channelId, [message.id])
+    })
+    client.on(Events.MessageBulkDelete, (messages, channel) => {
+      forgetPosts(channel.guildId, channel.id, [...messages.keys()])
+    })
     client.on(Events.ChannelDelete, channel => {
       // posts are removed by the cascade
       if (!channel.isDMBased()) db().prepare('DELETE FROM starboards WHERE guild_id = ? AND channel_id = ?').run(channel.guildId, channel.id)
     })
-    client.on(Events.MessageReactionRemoveEmoji, reaction => {
-      const guildId = reaction.message.guildId
-      if (!guildId) return
-      const boards = starboardsFor(guildId).filter(board => emojiKey(board.emoji) === reactionKey(reaction.emoji))
-      removeFromBoards(reaction.message, boards).catch(error => console.error('Starboard clear failed:', error))
-    })
+    // the board's other emojis may still hold the post up, so this gets recounted like any other reaction change
+    client.on(Events.MessageReactionRemoveEmoji, handle)
   },
+  // posts are removed by the cascade
+  forgetGuild: guildId => Number(db().prepare('DELETE FROM starboards WHERE guild_id = ?').run(guildId).changes),
 }

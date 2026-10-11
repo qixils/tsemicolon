@@ -237,4 +237,5 @@ export const rulesFeature: Feature = {
     'setup rules remove': suggestRules(false),
     'setup rules ping': suggestRules(false),
   },
+  forgetGuild: guildId => Number(db().prepare('DELETE FROM rules WHERE guild_id = ?').run(guildId).changes),
 }

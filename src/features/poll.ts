@@ -19,7 +19,7 @@ import { text, withSchema } from '../db.js'
 import { customId, localizedDescription, localizedName, type Feature } from '../feature.js'
 import { t, type MaybeLocales, type MessageKey } from '../i18n.js'
 import { CUSTOM_EMOJI, UNICODE_EMOJI_SOURCE, emojiKey } from '../util/emoji.js'
-import { starboardsFor } from './starboard.js'
+import { boardEmojiKeys, starboardsFor } from './starboard.js'
 
 /** Discord's limit on (unique) reactions per message */
 const REACTIONS_PER_MESSAGE = 20
@@ -170,7 +170,7 @@ const pollModal = (draftId = 0, draft?: Draft, locales: MaybeLocales = []) => {
 const emojisFor = (guildId: string, { emojis, message }: Draft) => {
   const parsed = !emojis ? parseLines(message) : parseShorthand(emojis)
   // starboard emojis would let a poll star itself
-  const reserved = new Set(starboardsFor(guildId).map(board => emojiKey(board.emoji)))
+  const reserved = new Set(starboardsFor(guildId).flatMap(board => [...boardEmojiKeys(board)]))
   return [...new Map(parsed
     .filter(emoji => !reserved.has(emojiKey(emoji)))
     .map(emoji => [emojiKey(emoji), emoji])).values()]
@@ -278,4 +278,5 @@ export const pollFeature: Feature = {
       await submitPoll(interaction, Number(id))
     },
   },
+  forgetUser: userId => Number(db().prepare('DELETE FROM poll_drafts WHERE user_id = ?').run(userId).changes),
 }

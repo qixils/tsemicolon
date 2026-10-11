@@ -106,6 +106,12 @@ export class PokemonStore {
     `).run(userId, at)
   }
 
+  /** Deletes everything stored about a user. Returns how many rows were removed. */
+  forget(userId: string): number {
+    return asNumber(this.db.prepare('DELETE FROM pokemon_caught WHERE user_id = ?').run(userId).changes)
+      + asNumber(this.db.prepare('DELETE FROM pokemon_trainers WHERE user_id = ?').run(userId).changes)
+  }
+
   /** Bulk legacy import. Returns how many rows were new. */
   addCatches(entries: readonly { userId: string, pokemonId: number, variant: Variant }[]): number {
     const insert = this.db.prepare(

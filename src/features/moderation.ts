@@ -9,6 +9,7 @@ import {
   time,
   type ChatInputCommandInteraction,
   type Client,
+  type Guild,
   type GuildMember,
 } from 'discord.js'
 import { text, withSchema } from '../db.js'
@@ -39,18 +40,21 @@ export const addLegacyUnmute = (unmute: { guildId: string, userId: string, roleI
     .run(unmute.guildId, unmute.userId, unmute.roleId, unmute.runAt)
 }
 
+/** Tries to take a legacy mute role off a member */
+const removeLegacyMute = async (guild: Guild, userId: string, roleId: string) => {
+  const role = guild.roles.cache.get(roleId)
+  const member = await guild.members.fetch(userId).catch(() => null)
+  if (role?.editable && member?.roles.cache.has(roleId)) {
+    await member.roles.remove(role, t([guild.preferredLocale], 'mute.legacy_expired')).catch(() => {})
+  }
+}
+
 const runLegacyUnmutes = async (client: Client) => {
   const due = db().prepare('SELECT * FROM legacy_unmutes WHERE run_at <= ?').all(Date.now())
   for (const row of due) {
     const [guildId, userId, roleId] = [text(row, 'guild_id'), text(row, 'user_id'), text(row, 'role_id')]
     const guild = client.guilds.cache.get(guildId)
-    if (guild) {
-      const role = guild.roles.cache.get(roleId)
-      const member = await guild.members.fetch(userId).catch(() => null)
-      if (role?.editable && member?.roles.cache.has(roleId)) {
-        await member.roles.remove(role, t([guild.preferredLocale], 'mute.legacy_expired')).catch(() => {})
-      }
-    }
+    if (guild) await removeLegacyMute(guild, userId, roleId)
     db().prepare('DELETE FROM legacy_unmutes WHERE guild_id = ? AND user_id = ? AND role_id = ?').run(guildId, userId, roleId)
   }
 }
@@ -208,4 +212,16 @@ export const moderationFeature: Feature = {
       if (client.isReady()) runLegacyUnmutes(client).catch(error => console.error('Legacy unmute failed:', error))
     }, 30 * 1000).unref()
   },
+  forgetGuild: async (guildId, client) => {
+    // nothing would be left to lift these mutes, so lift them now
+    const guild = client.guilds.cache.get(guildId)
+    if (guild) {
+      for (const row of db().prepare('SELECT user_id, role_id FROM legacy_unmutes WHERE guild_id = ?').all(guildId)) {
+        await removeLegacyMute(guild, text(row, 'user_id'), text(row, 'role_id'))
+      }
+    }
+    // could use RETURNING but if we errored out it would leave us without the mutes
+    return Number(db().prepare('DELETE FROM legacy_unmutes WHERE guild_id = ?').run(guildId).changes)
+  },
+  forgetUser: userId => Number(db().prepare('DELETE FROM legacy_unmutes WHERE user_id = ?').run(userId).changes), // I guess they're muted forever lol
 }

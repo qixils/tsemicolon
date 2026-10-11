@@ -383,4 +383,5 @@ export const rolesFeature: Feature = {
       db().prepare('DELETE FROM flairs WHERE guild_id = ? AND role_id = ?').run(role.guild.id, role.id)
     })
   },
+  forgetGuild: guildId => Number(db().prepare('DELETE FROM flairs WHERE guild_id = ?').run(guildId).changes),
 }

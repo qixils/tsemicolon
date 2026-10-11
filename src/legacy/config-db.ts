@@ -7,7 +7,7 @@ import { addFlair } from '../features/roles.js'
 import { addLegacyUnmute } from '../features/moderation.js'
 import { createReminderRow } from '../features/reminders.js'
 import { addRule, listRules } from '../features/rules.js'
-import { DEFAULT_STAR, DEFAULT_THRESHOLD, addLegacyPosts, createStarboard, starboardsFor } from '../features/starboard.js'
+import { DEFAULT_STAR, DEFAULT_THRESHOLD, addLegacyPosts, boardEmojiKeys, createStarboard, starboardsFor } from '../features/starboard.js'
 import { createSubscription } from '../features/subscriptions.js'
 import { registerLegacyImporter } from '../legacy.js'
 import { getSetting, setSetting, type SettingKey, type Settings } from '../settings.js'
@@ -152,7 +152,7 @@ const importSettings = (legacy: DatabaseSync, client: Client<true>) => {
       const emojiValue = config.get('starboard_emoji')
       const thresholdValue = config.get('starboard_threshold')
       const emoji = typeof emojiValue === 'string' && emojiValue ? emojiValue : DEFAULT_STAR
-      const exists = starboardsFor(guildId).some(board => board.channelId === starboardChannel && emojiKey(board.emoji) === emojiKey(emoji))
+      const exists = starboardsFor(guildId).some(board => board.channelId === starboardChannel && boardEmojiKeys(board).has(emojiKey(emoji)))
       if (!exists) {
         createStarboard({
           guildId,
@@ -161,6 +161,7 @@ const importSettings = (legacy: DatabaseSync, client: Client<true>) => {
           threshold: typeof thresholdValue === 'number' && thresholdValue > 0 ? thresholdValue : DEFAULT_THRESHOLD,
           legacy: true,
           legacyThresholds: thresholdsFrom(config.get('starboard_legacy_thresholds')),
+          legacyEmojis: [],
         })
         starboards++
       }

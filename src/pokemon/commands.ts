@@ -261,4 +261,5 @@ export const pokemonFeature: Feature = {
       .then(dex => console.log(`Loaded ${dex.entries.size} Pokémon (${dex.totalVariants} variants)`))
       .catch(error => console.error('Pokémon startup failed:', error))
   },
+  forgetUser: userId => getStore().forget(userId),
 }

@@ -4,6 +4,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
+  Events,
   MessageFlags,
   OverwriteType,
   PermissionFlagsBits,
@@ -53,6 +54,11 @@ export interface Settings {
 }
 export type SettingKey = keyof Settings
 
+const CHANNEL_SETTINGS = [
+  'joinlog_channel', 'namelog_channel', 'messagelog_channel', 'rolelog_channel', 'reports_channel', 'antispam_channel',
+] as const satisfies SettingKey[]
+type ChannelSettingKey = (typeof CHANNEL_SETTINGS)[number]
+
 export const getSetting = <K extends SettingKey>(guildId: string, key: K): Settings[K] | undefined => {
   const row = db().prepare('SELECT value FROM guild_settings WHERE guild_id = ? AND key = ?').get(guildId, key)
   return row ? JSON.parse(String(row['value'])) as Settings[K] : undefined
@@ -69,10 +75,16 @@ export const clearSetting = (guildId: string, key: SettingKey) => {
   db().prepare('DELETE FROM guild_settings WHERE guild_id = ? AND key = ?').run(guildId, key)
 }
 
+/** Clears any of the `keys` settings that are set to `value` */
+const clearSettingsWithValue = (guildId: string, keys: readonly SettingKey[], value: Settings[SettingKey]) => {
+  db().prepare(`DELETE FROM guild_settings WHERE guild_id = ? AND value = ? AND key IN (${keys.map(() => '?').join(', ')})`)
+    .run(guildId, JSON.stringify(value), ...keys)
+}
+
 /** The configured channel for `key`, if it exists and the bot can post there */
 export const getSettingChannel = (
   guild: Guild,
-  key: 'joinlog_channel' | 'namelog_channel' | 'messagelog_channel' | 'rolelog_channel' | 'reports_channel' | 'antispam_channel',
+  key: ChannelSettingKey,
   extra: PermissionResolvable[] = [],
 ): GuildTextBasedChannel | null => postableChannel(guild, getSetting(guild.id, key), extra)
 
@@ -90,7 +102,7 @@ export const channelSubcommand = (name: MessageKey, description: MessageKey): AP
 })
 
 export interface ChannelSetup {
-  setting: 'joinlog_channel' | 'namelog_channel' | 'messagelog_channel' | 'rolelog_channel' | 'reports_channel'
+  setting: Exclude<ChannelSettingKey, 'antispam_channel'>
   /** Name used when the bot has to create the channel */
   defaultName: string
   topic: MessageKey
@@ -275,5 +287,29 @@ export const settingsFeature: Feature = {
         components: [],
       })
     },
+  },
+  attach(client) {
+    client.on(Events.ChannelDelete, channel => {
+      if (!channel.isDMBased()) clearSettingsWithValue(channel.guildId, CHANNEL_SETTINGS, channel.id)
+    })
+    client.on(Events.GuildRoleDelete, role => {
+      clearSettingsWithValue(role.guild.id, ['join_role'], role.id)
+    })
+  },
+  forgetGuild: guildId => Number(db().prepare('DELETE FROM guild_settings WHERE guild_id = ?').run(guildId).changes),
+  forgetUser: userId => {
+    let removed = 0
+    // the stored value is a JSON array of IDs, so the quoted ID only matches whole entries
+    const rows = db().prepare("SELECT guild_id, value FROM guild_settings WHERE key = 'messagelog_ignored' AND value LIKE ?")
+      .all(`%${JSON.stringify(userId)}%`)
+    for (const row of rows) {
+      const guildId = String(row['guild_id'])
+      const ignored = JSON.parse(String(row['value'])) as Settings['messagelog_ignored']
+      const remaining = ignored.filter(id => id !== userId)
+      if (remaining.length) setSetting(guildId, 'messagelog_ignored', remaining)
+      else clearSetting(guildId, 'messagelog_ignored')
+      removed++
+    }
+    return removed
   },
 }
