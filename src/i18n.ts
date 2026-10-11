@@ -4,7 +4,7 @@ export type MessageKey = keyof typeof messages
 type Template = string | Partial<Record<Intl.LDMLPluralRule, string>>
 export type Vars = Record<string, string | number | bigint>
 
-type Locale = 'en-US'
+export type Locale = 'en-US'
 export const DEFAULT_LOCALE = 'en-US' satisfies Locale
 
 const tables: Record<Locale, Record<MessageKey, Template>> = {
@@ -57,8 +57,11 @@ export const t = (locales: MaybeLocales, key: MessageKey, vars: Vars = {}): stri
 export const tAll = (key: MessageKey, vars: Vars = {}): Partial<Record<Locale, string>> =>
   Object.fromEntries(allLocales.map(locale => [locale, t([locale], key, vars)]))
 
+/** Returns a non-empty array of all valid input locales with the default */
+export const resolveLocales = (locales: MaybeLocales): Locale[] => [...verifyLocales(locales), DEFAULT_LOCALE]
+
 /** Formats a number for display, e.g. `1,234`. */
-export const formatNumber = (locales: MaybeLocales, value: number) =>
-  // we use verifyLocales so that we don't localize numbers into languages the bot doesn't support
+export const formatNumber = (locales: MaybeLocales, value: number, options?: Intl.NumberFormatOptions) =>
+  // we use resolveLocales so that we don't localize numbers into languages the bot doesn't support
   // as it is my understanding that say, german folk generally find it confusing to have english text with german numbers
-  value.toLocaleString([...verifyLocales(locales), DEFAULT_LOCALE])
+  value.toLocaleString(resolveLocales(locales), options)

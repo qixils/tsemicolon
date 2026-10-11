@@ -234,7 +234,7 @@ const submitPoll = async (interaction: ModalSubmitInteraction<'cached'>, draftId
   if (interaction.isFromMessage()) await interaction.deferUpdate()
   else await interaction.deferReply({ flags: MessageFlags.Ephemeral })
 
-  const failed = await postPoll(channel, interaction.user, emojis, draft.message, locales)
+  const failed = await postPoll(channel, interaction.user, emojis, draft.message, [interaction.guildLocale])
   if (draftId) deleteDraft(draftId)
 
   if (failed > 0) await interaction.editReply({ content: t(locales, 'poll.some_failed', { count: failed }), components: [] })

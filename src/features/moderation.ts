@@ -75,9 +75,9 @@ export const notifyMuted = async (member: GuildMember, until: Date, reason?: str
 const fail = (interaction: ChatInputCommandInteraction, key: MessageKey, vars: Vars = {}) =>
   interaction.reply({ content: t([interaction.locale, interaction.guildLocale], key, vars), flags: MessageFlags.Ephemeral })
 
-const auditReason = (interaction: ChatInputCommandInteraction, command: string) => {
+const auditReason = (interaction: ChatInputCommandInteraction, command: MessageKey) => {
   const reason = interaction.options.getString('reason')
-  const signature = t(interaction.guildLocale, 'moderation.audit', { moderator: interaction.user.tag, id: interaction.user.id, command })
+  const signature = t(interaction.guildLocale, 'moderation.audit', { moderator: interaction.user.tag, id: interaction.user.id, command: t(interaction.guildLocale, command) })
   return truncate(reason ? `${reason}\n${signature}` : signature, 512)
 }
 
@@ -168,8 +168,8 @@ export const moderationFeature: Feature = {
       const user = target?.user ?? await interaction.client.users.fetch(id).catch(() => null)
 
       const days = interaction.options.getInteger('delete_messages') ?? 0
-      await guild.bans.create(id, { deleteMessageSeconds: days * DAY_SECONDS, reason: auditReason(interaction, 'ban') })
-      await interaction.reply({ content: t(locales, 'ban.done', { user: `<@${id}>`, tag: escapeMarkdown(user?.tag ?? t(locales, 'common.unavailable')) }) })
+      await guild.bans.create(id, { deleteMessageSeconds: days * DAY_SECONDS, reason: auditReason(interaction, 'command.ban.name') })
+      await interaction.reply({ content: t(locales, 'ban.done', { user: `<@${id}>`, tag: escapeMarkdown(user?.tag ?? t(locales, 'common.unavailable')) }), flags: MessageFlags.Ephemeral })
     },
     mute: async interaction => {
       if (!interaction.inCachedGuild()) return
@@ -188,13 +188,14 @@ export const moderationFeature: Feature = {
       if (duration <= 0) return fail(interaction, 'mute.in_past')
       if (duration > MAX_TIMEOUT_MILLIS) return fail(interaction, 'mute.too_long')
 
-      await target.timeout(duration, auditReason(interaction, 'mute'))
+      await target.timeout(duration, auditReason(interaction, 'command.mute.name'))
       await interaction.reply({
         content: t(locales, 'mute.done', {
           user: target.toString(),
           until: time(until, TimestampStyles.FullDateShortTime),
           relative: time(until, TimestampStyles.RelativeTime),
         }),
+        flags: MessageFlags.Ephemeral,
       })
       const reason = interaction.options.getBoolean('notify_user') ? interaction.options.getString('reason') : null
       if (!await notifyMuted(target, until, reason)) {

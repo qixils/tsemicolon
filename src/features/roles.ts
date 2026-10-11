@@ -7,6 +7,7 @@ import {
   DiscordAPIError,
   EmbedBuilder,
   escapeMarkdown,
+  Events,
   InteractionContextType,
   MessageFlags,
   PermissionFlagsBits,
@@ -239,7 +240,7 @@ const roleOption = {
 }
 const descriptionOption = {
   type: ApplicationCommandOptionType.String as const,
-  ...localizedName('command.setup.flair.option.name.description'),
+  ...localizedName('command.setup.flair.option.description.name'),
   ...localizedDescription('command.setup.flair.option.description.description'),
   max_length: 100,
 }
@@ -291,12 +292,6 @@ export const rolesFeature: Feature = {
       },
       {
         type: ApplicationCommandOptionType.Subcommand,
-        ...localizedName('command.setup.flair.delete.name'),
-        ...localizedDescription('command.setup.flair.delete.description'),
-        options: [roleOption],
-      },
-      {
-        type: ApplicationCommandOptionType.Subcommand,
         ...localizedName('command.setup.flair.description.name'),
         ...localizedDescription('command.setup.flair.description.description'),
         options: [roleOption, descriptionOption],
@@ -344,7 +339,7 @@ export const rolesFeature: Feature = {
         await interaction.reply({ content: t(locales, 'flair.add_too_high'), flags: MessageFlags.Ephemeral })
         return
       }
-      const role = existing ?? await interaction.guild.roles.create({ name, reason: t(locales, 'audit.requested_by', { user: interaction.user.tag }) })
+      const role = existing ?? await interaction.guild.roles.create({ name, reason: t(interaction.guildLocale, 'audit.requested_by', { user: interaction.user.tag }) })
       const added = addFlair(interaction.guildId, role.id, description)
       await interaction.reply({
         content: t(locales, !added ? 'flair.exists' : existing ? 'flair.add_success' : 'flair.create_success', { role: role.toString() }),
@@ -357,22 +352,6 @@ export const rolesFeature: Feature = {
       const role = interaction.options.getRole('role', true)
       const removed = Number(db().prepare('DELETE FROM flairs WHERE guild_id = ? AND role_id = ?').run(interaction.guildId, role.id).changes) > 0
       await interaction.reply({ content: t(locales, removed ? 'flair.remove_success' : 'flair.not_flair', { role: role.toString() }), flags: MessageFlags.Ephemeral })
-    },
-    'setup flair delete': async interaction => {
-      if (!interaction.inCachedGuild() || !await checkMemberManageRoles(interaction)) return
-      const locales = [interaction.locale, interaction.guildLocale]
-      const role = interaction.options.getRole('role', true)
-      const removed = Number(db().prepare('DELETE FROM flairs WHERE guild_id = ? AND role_id = ?').run(interaction.guildId, role.id).changes) > 0
-      if (!removed) {
-        await interaction.reply({ content: t(locales, 'flair.not_flair', { role: role.toString() }), flags: MessageFlags.Ephemeral })
-        return
-      }
-      if (!role.editable) {
-        await interaction.reply({ content: t(locales, 'flair.delete_too_high', { role: role.toString() }), flags: MessageFlags.Ephemeral })
-        return
-      }
-      await role.delete(t(locales, 'audit.requested_by', { user: interaction.user.tag }))
-      await interaction.reply({ content: t(locales, 'flair.delete_success', { role: role.name }), flags: MessageFlags.Ephemeral })
     },
     'setup flair description': async interaction => {
       if (!interaction.inCachedGuild() || !await checkMemberManageRoles(interaction)) return
@@ -398,5 +377,10 @@ export const rolesFeature: Feature = {
     flair: async (interaction, args) => {
       if (interaction.inCachedGuild()) await onFlair(interaction, args)
     },
+  },
+  attach(client) {
+    client.on(Events.GuildRoleDelete, role => {
+      db().prepare('DELETE FROM flairs WHERE guild_id = ? AND role_id = ?').run(role.guild.id, role.id)
+    })
   },
 }

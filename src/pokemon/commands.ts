@@ -14,7 +14,7 @@ import {
 import { localizedDescription, localizedName, type Feature } from '../feature.js'
 import { formatNumber, t } from '../i18n.js'
 import { randomItem, seededRng } from '../random.js'
-import { getDex, startDex, statName, type Dex, type PokemonEntry } from './dex.js'
+import { getDex, startDex, statName, typeName, type Dex, type PokemonEntry } from './dex.js'
 import { getSprite } from './sprites.js'
 import { getStore } from './storage.js'
 import { describeVariant, rollVariant, variantCount, type Variant } from './variants.js'
@@ -87,10 +87,10 @@ export const handlePokemonSearch = async (interaction: ChatInputCommandInteracti
   const variant = rollVariant(entry)
   const embed = baseEmbed(interaction)
     .setColor(POKEMON_RED)
-    .setTitle(describeVariant(entry, variant))
+    .setTitle(describeVariant(entry, variant, locales))
 
   if (entry.types.length > 0) {
-    embed.addFields({ name: t(locales, 'pokemon.search.types'), value: entry.types.join(' / '), inline: true })
+    embed.addFields({ name: t(locales, 'pokemon.search.types'), value: entry.types.map(type => typeName(type, locales)).join(' / '), inline: true })
   }
 
   if (entry.stats.length > 0) {
@@ -153,7 +153,7 @@ export const handlePokemonCatch = async (interaction: ChatInputCommandInteractio
 
   const embed = baseEmbed(interaction)
     .setColor(isNew ? Colors.Green : Colors.DarkGreen)
-    .setTitle(t(locales, 'pokemon.catch.title', { pokemon: describeVariant(entry, variant) }))
+    .setTitle(t(locales, 'pokemon.catch.title', { pokemon: describeVariant(entry, variant, locales) }))
     .setDescription(description)
 
   const files = await attachSprite(embed, entry, variant)
@@ -181,7 +181,7 @@ export const handlePokemonLeaderboard = async (interaction: ChatInputCommandInte
   }
 
   const percent = (count: number) =>
-    `${((Math.min(count, dex.totalVariants) / dex.totalVariants) * 100).toFixed(2)}%`
+    formatNumber(locales, Math.min(count, dex.totalVariants) / dex.totalVariants, { style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
   const nameFor = (userId: string, cached: string | null) => {
     const known = interaction.client.users.cache.get(userId)?.displayName ?? cached

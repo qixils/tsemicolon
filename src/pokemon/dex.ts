@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DEX_CACHE_DIR, USER_AGENT } from '../config.js'
-import { t, type MaybeLocales, type MessageKey } from '../i18n.js'
+import { DEFAULT_LOCALE, resolveLocales, t, type Locale, type MaybeLocales, type MessageKey } from '../i18n.js'
 import { parseCsv } from './csv.js'
 
 /**
@@ -16,7 +16,13 @@ type CsvFile = (typeof CSV_FILES)[number]
 type CsvRows = Record<string, string>[]
 
 const REFRESH_INTERVAL = 24 * 60 * 60 * 1000
-const ENGLISH = '9'
+/** Map of our supported locales to PokéAPI's `local_language_id` */
+const POKEAPI_LANGUAGES: Record<Locale, string> = {
+  'en-US': '9',
+}
+const LOCALES = Object.keys(POKEAPI_LANGUAGES) as Locale[]
+/** Map of PokéAPI's `local_language_id` to our supported locales */
+const LOCALE_BY_LANGUAGE = new Map(LOCALES.map(locale => [POKEAPI_LANGUAGES[locale], locale]))
 /** "real" pokemon are less than this */
 const LAST_SPECIES_ID = 10000
 
@@ -38,14 +44,49 @@ export const statName = (name: string, locales: MaybeLocales) => {
   return key ? t(locales, key) : name
 }
 
+const TYPE_NAMES: Record<string, MessageKey> = {
+  'normal': 'pokemon.type.normal',
+  'fighting': 'pokemon.type.fighting',
+  'flying': 'pokemon.type.flying',
+  'poison': 'pokemon.type.poison',
+  'ground': 'pokemon.type.ground',
+  'rock': 'pokemon.type.rock',
+  'bug': 'pokemon.type.bug',
+  'ghost': 'pokemon.type.ghost',
+  'steel': 'pokemon.type.steel',
+  'fire': 'pokemon.type.fire',
+  'water': 'pokemon.type.water',
+  'grass': 'pokemon.type.grass',
+  'electric': 'pokemon.type.electric',
+  'psychic': 'pokemon.type.psychic',
+  'ice': 'pokemon.type.ice',
+  'dragon': 'pokemon.type.dragon',
+  'dark': 'pokemon.type.dark',
+  'fairy': 'pokemon.type.fairy',
+  'stellar': 'pokemon.type.stellar',
+  'bird': 'pokemon.type.bird',
+}
+
+export const typeName = (name: string, locales: MaybeLocales) => {
+  const key = TYPE_NAMES[name]
+  return key ? t(locales, key) : titleCase(name)
+}
+
+/** Returns the localized name for a 'mon */
+export const pokemonName = (entry: PokemonEntry, locales: MaybeLocales) =>
+  resolveLocales(locales).map(locale => entry.names[locale]).find(Boolean) ?? entry.name
+
 export interface StatLine { name: string, value: number }
 
 export interface PokemonEntry {
   id: number
   /** `deoxys-attack` */
   slug: string
-  /** `Attack Deoxys` */
+  /** `Attack Deoxys`, in the default locale */
   name: string
+  /** {@link name} in each supported locale where available */
+  names: Partial<Record<Locale, string>>
+  /** type identifiers, i.e. `fire` */
   types: string[]
   stats: StatLine[]
   /** -1 = genderless, otherwise a numerator over 8 representing percent of female (0 = always male, 8 = always female) */
@@ -123,8 +164,21 @@ const groupBy = (rows: CsvRows, key: string) => {
   return groups
 }
 
+/** Returns a map of each ID to its names in the supported locales */
+const localizedNames = (rows: CsvRows, idColumn: string, nameColumn: string) => {
+  const names = new Map<string, Partial<Record<Locale, string>>>()
+  for (const row of rows) {
+    const locale = LOCALE_BY_LANGUAGE.get(row['local_language_id'] ?? '')
+    const name = row[nameColumn]
+    if (!locale || !name) continue
+    const id = row[idColumn] ?? ''
+    names.set(id, { ...names.get(id), [locale]: name })
+  }
+  return names
+}
+
 const buildDex = (csv: Record<CsvFile, CsvRows>): Dex => {
-  const typeNames = new Map(csv.types.map(row => [row['id'] ?? '', titleCase(row['identifier'] ?? '')]))
+  const typeIdentifiers = new Map(csv.types.map(row => [row['id'] ?? '', row['identifier'] ?? '']))
 
   const statNames = new Map(
     csv.stats
@@ -136,16 +190,8 @@ const buildDex = (csv: Record<CsvFile, CsvRows>): Dex => {
   )
 
   const species = new Map(csv.pokemon_species.map(row => [row['id'] ?? '', row]))
-  const speciesNames = new Map(
-    csv.pokemon_species_names
-      .filter(row => row['local_language_id'] === ENGLISH)
-      .map(row => [row['pokemon_species_id'] ?? '', row['name'] ?? '']),
-  )
-  const formNames = new Map(
-    csv.pokemon_form_names
-      .filter(row => row['local_language_id'] === ENGLISH && row['pokemon_name'])
-      .map(row => [row['pokemon_form_id'] ?? '', row['pokemon_name'] ?? '']),
-  )
+  const speciesNames = localizedNames(csv.pokemon_species_names, 'pokemon_species_id', 'name')
+  const formNames = localizedNames(csv.pokemon_form_names, 'pokemon_form_id', 'pokemon_name')
 
   // a Pokémon can own several forms; the default one supplies its display name
   const formsByPokemon = groupBy(csv.pokemon_forms, 'pokemon_id')
@@ -158,7 +204,8 @@ const buildDex = (csv: Record<CsvFile, CsvRows>): Dex => {
     id: MISSINGNO_ID,
     slug: 'missingno',
     name: 'MissingNo.',
-    types: ['Bird', 'Normal'], // TODO
+    names: {},
+    types: ['bird', 'normal'],
     stats: [],
     genderRate: -1,
     hasGenderDifferences: false,
@@ -181,9 +228,15 @@ const buildDex = (csv: Record<CsvFile, CsvRows>): Dex => {
     const formName = defaultForm ? formNames.get(defaultForm['id'] ?? '') : undefined
     const speciesName = speciesNames.get(speciesKey)
 
-    // base species read best by their species name ("Venusaur"),
-    // alternate forms by their form name ("Attack Deoxys")
-    const name = (id > LAST_SPECIES_ID ? formName ?? speciesName : speciesName ?? formName) ?? titleCase(slug)
+    // base species use their species name ("Venusaur"),
+    // alternate forms use their form name ("Attack Deoxys")
+    const preferred = id > LAST_SPECIES_ID ? [formName, speciesName] : [speciesName, formName]
+    const names: Partial<Record<Locale, string>> = {}
+    for (const locale of LOCALES) {
+      const localized = preferred.map(candidates => candidates?.[locale]).find(Boolean)
+      if (localized) names[locale] = localized
+    }
+    const name = names[DEFAULT_LOCALE] ?? titleCase(slug)
 
     const rawGenderRate = speciesRow ? Number(speciesRow['gender_rate']) : -1
     const genderRate = Number.isFinite(rawGenderRate) ? rawGenderRate : -1
@@ -191,7 +244,7 @@ const buildDex = (csv: Record<CsvFile, CsvRows>): Dex => {
     const types = (typesByPokemon.get(key) ?? [])
       .slice()
       .sort((a, b) => Number(a['slot']) - Number(b['slot']))
-      .flatMap(type => typeNames.get(type['type_id'] ?? '') ?? [])
+      .flatMap(type => typeIdentifiers.get(type['type_id'] ?? '') ?? [])
 
     const stats = (statsByPokemon.get(key) ?? []).flatMap(stat => {
       const name = statNames.get(stat['stat_id'] ?? '')
@@ -202,6 +255,7 @@ const buildDex = (csv: Record<CsvFile, CsvRows>): Dex => {
       id,
       slug,
       name,
+      names,
       types,
       stats,
       genderRate,
@@ -227,7 +281,7 @@ const buildDex = (csv: Record<CsvFile, CsvRows>): Dex => {
   for (const id of ids) {
     const entry = entries.get(id)!
     index(entry.slug, id)
-    index(entry.name, id)
+    for (const name of [entry.name, ...Object.values(entry.names)]) index(name, id)
   }
 
   const find = (query: string): PokemonEntry | undefined => {

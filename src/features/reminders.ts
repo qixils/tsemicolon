@@ -4,10 +4,12 @@ import {
   ApplicationCommandType,
   ButtonBuilder,
   ButtonStyle,
+  ComponentType,
   InteractionContextType,
   MessageFlags,
   TimestampStyles,
   time,
+  type ButtonComponent,
   type ButtonInteraction,
   type Client,
 } from 'discord.js'
@@ -37,8 +39,10 @@ const db = withSchema(`
     content    TEXT    NOT NULL,
     remind_at  INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
-    status     TEXT    NOT NULL DEFAULT 'pending' -- pending | sent | cancelled
+    status     TEXT    NOT NULL DEFAULT 'pending', -- pending | sent | cancelled
     hidden     INTEGER NOT NULL DEFAULT 0,
+    -- the recipient's locale, for the reminder DM
+    locale     TEXT
   );
   CREATE INDEX IF NOT EXISTS reminders_due ON reminders (status, remind_at);
   CREATE INDEX IF NOT EXISTS reminders_by_parent ON reminders (parent_id, user_id);
@@ -58,6 +62,7 @@ export interface Reminder {
   createdAt: number
   status: Status
   hidden: number
+  locale: string | null
 }
 
 const toReminder = (row: Row): Reminder => ({
@@ -72,16 +77,17 @@ const toReminder = (row: Row): Reminder => ({
   createdAt: int(row, 'created_at'),
   status: text(row, 'status') as Status,
   hidden: int(row, 'hidden'),
+  locale: optionalText(row, 'locale'),
 })
 
 export const createReminderRow = (reminder: Omit<Reminder, 'id' | 'status'>): number => {
   const result = db().prepare(`
-    INSERT INTO reminders (user_id, guild_id, channel_id, message_id, parent_id, content, remind_at, created_at, hidden)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO reminders (user_id, guild_id, channel_id, message_id, parent_id, content, remind_at, created_at, hidden, locale)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     reminder.userId, reminder.guildId, reminder.channelId, reminder.messageId,
     reminder.parentId, reminder.content, reminder.remindAt, reminder.createdAt,
-    reminder.hidden,
+    reminder.hidden, reminder.locale,
   )
   return Number(result.lastInsertRowid)
 }
@@ -114,15 +120,24 @@ const button = (action: string, id: number, emoji: string, label: string, style 
 
 const cancelButton = (id: number, locales: MaybeLocales) => button('cancel', id, '🗑️', t(locales, 'remind.button.cancel'))
 
-const controls = (id: number, hidden: boolean, locales: MaybeLocales) => [
+const controls = (id: number, hidden: boolean, locales: MaybeLocales, publicLocales: MaybeLocales = locales) => [
   new ActionRowBuilder<ButtonBuilder>().addComponents(hidden
     ? [cancelButton(id, locales)]
     : [
-        button('join', id, '🖐️', t(locales, 'remind.button.join'), ButtonStyle.Primary),
+        button('join', id, '🖐️', t(publicLocales, 'remind.button.join'), ButtonStyle.Primary),
         cancelButton(id, locales),
         button('hide', id, '🙈', t(locales, 'remind.button.hide')),
       ]),
 ]
+
+/** Returns the message's buttons with the one that was just clicked disabled */
+const disableClicked = (interaction: ButtonInteraction) => {
+  const buttons = interaction.message.components
+    .flatMap(row => row.type === ComponentType.ActionRow ? row.components : [])
+    .filter((component): component is ButtonComponent => component.type === ComponentType.Button)
+    .map(button => ButtonBuilder.from(button).setDisabled(button.disabled || button.customId === interaction.customId))
+  return buttons.length ? [new ActionRowBuilder<ButtonBuilder>().addComponents(buttons)] : []
+}
 
 const announcement = (reminder: Reminder, locales: MaybeLocales) =>
   t(locales, 'remind.set', { user: `<@${reminder.userId}>`, ...when(reminder.remindAt), text: quote(reminder.content) })
@@ -152,6 +167,7 @@ const onButton = async (interaction: ButtonInteraction, action: string, reminder
         remindAt: reminder.remindAt,
         createdAt: Date.now(),
         hidden: 1, // just to avoid publicly spamming a bunch of joined reminders all at once if everyone is lacking DM access lol
+        locale: interaction.locale,
       })
       await interaction.reply({
         content: t(locales, 'remind.join.done', { ...when(reminder.remindAt), text: quote(reminder.content) }),
@@ -166,7 +182,12 @@ const onButton = async (interaction: ButtonInteraction, action: string, reminder
       if (!setStatus(reminder.id, 'cancelled')) {
         return ephemeral(t(locales, reminder.status === 'sent' ? 'remind.already_sent' : 'remind.already_cancelled'))
       }
-      await interaction.update({ content: t(locales, 'remind.cancelled', { text: quote(reminder.content) }), components: [] })
+      // the original message stays as-is (it may be public), only the owner hears about the cancellation
+      await interaction.update({ components: disableClicked(interaction) })
+      await interaction.followUp({
+        content: t(locales, 'remind.cancelled', { text: quote(reminder.content) }),
+        ...(interaction.inGuild() && { flags: MessageFlags.Ephemeral }),
+      })
       return
     }
 
@@ -194,7 +215,7 @@ const jumpLink = (reminder: Reminder) =>
 
 const deliver = async (client: Client, reminder: Reminder): Promise<boolean> => {
   const guild = reminder.guildId ? client.guilds.cache.get(reminder.guildId) : undefined
-  const locales = [guild?.preferredLocale]
+  const locales = [reminder.locale, guild?.preferredLocale]
   const link = jumpLink(reminder)
   const content = [
     t(locales, 'remind.delivery', { created: time(new Date(reminder.createdAt), TimestampStyles.RelativeTime), text: quote(reminder.content) }),
@@ -315,12 +336,13 @@ export const remindersFeature: Feature = {
         remindAt: at.getTime(),
         createdAt: Date.now(),
         hidden: ephemeral ? 1 : 0,
+        locale: interaction.locale,
       }
       const id = createReminderRow(reminder)
 
       const response = await interaction.reply({
         content: announcement({ ...reminder, id, status: 'pending' }, locales),
-        components: controls(id, unjoinable, locales),
+        components: controls(id, unjoinable, locales, [interaction.guildLocale]),
         withResponse: true,
         ...(ephemeral && { flags: MessageFlags.Ephemeral }),
       })

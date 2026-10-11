@@ -190,16 +190,17 @@ export const antispamFeature: Feature = {
     [NAMESPACE]: async (interaction, [action, userId = '']) => {
       if (action !== 'lift' || !interaction.inCachedGuild()) return
       const locales = [interaction.locale, interaction.guildLocale]
+      const publicLocales = [interaction.guildLocale]
       if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
         await interaction.reply({ content: t(locales, 'report.no_permission'), flags: MessageFlags.Ephemeral })
         return
       }
       const member = await interaction.guild.members.fetch(userId).catch(() => null)
       if (member?.isCommunicationDisabled()) {
-        await member.timeout(null, t(locales, 'antispam.lifted_reason', { moderator: interaction.user.tag }))
+        await member.timeout(null, t(publicLocales, 'antispam.lifted_reason', { moderator: interaction.user.tag }))
       }
       await interaction.update({
-        content: `${interaction.message.content}\n${t(locales, 'antispam.lifted', { moderator: interaction.user.toString() })}`,
+        content: `${interaction.message.content}\n${t(publicLocales, 'antispam.lifted', { moderator: interaction.user.toString() })}`,
         components: [],
       })
     },

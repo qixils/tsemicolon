@@ -8,7 +8,7 @@ import {
 } from 'discord.js'
 import { int, text, withSchema } from '../db.js'
 import { localizedDescription, localizedName, type Feature } from '../feature.js'
-import { t, type MaybeLocales } from '../i18n.js'
+import { t } from '../i18n.js'
 import { chunkLines, truncate } from '../util/discord.js'
 
 const db = withSchema(`
@@ -40,8 +40,8 @@ export const getRuleById = (guildId: string, id: number): Rule | undefined =>
 export const addRule = (guildId: string, ruleText: string, ping = false) =>
   db().prepare('INSERT INTO rules (guild_id, text, ping) VALUES (?, ?, ?)').run(guildId, ruleText, ping ? 1 : 0)
 
-const formatRule = (rule: Rule, locales: MaybeLocales, showPing = false) =>
-  t(locales, 'rules.line', { number: rule.number, text: rule.text, ping: showPing && rule.ping ? ' 🔔' : '' })
+const formatRule = (rule: Rule, showPing = false) =>
+  `**${rule.number}.** ${rule.text}${showPing && rule.ping ? ' 🔔' : ''}`
 
 /** chunkify large messages */
 const replyInChunks = async (interaction: ChatInputCommandInteraction, content: string, ephemeral = false) => {
@@ -160,14 +160,14 @@ export const rulesFeature: Feature = {
 
       const query = interaction.options.getString('rule')?.trim()
       if (!query) {
-        await replyInChunks(interaction, [...rules.map(rule => formatRule(rule, locales)), t(locales, 'rules.disclaimer')].join('\n'), true)
+        await replyInChunks(interaction, [...rules.map(rule => formatRule(rule)), t(locales, 'rules.disclaimer')].join('\n'), true)
         return
       }
 
       if (/^\d+$/.test(query)) {
         const rule = rules[Number(query) - 1]
         // intentionally non-ephemeral so you can use this to quickly point others to a specific rule
-        if (rule) await interaction.reply({ content: formatRule(rule, locales) })
+        if (rule) await interaction.reply({ content: formatRule(rule) })
         else await interaction.reply({ content: t(locales, 'rules.missing', { number: query }), flags: MessageFlags.Ephemeral })
         return
       }
@@ -179,7 +179,7 @@ export const rulesFeature: Feature = {
       }
 
       // intentionally non-ephemeral so you can use this to quickly point others to a specific rule or rules
-      await replyInChunks(interaction, matches.map(rule => formatRule(rule, locales)).join('\n'))
+      await replyInChunks(interaction, matches.map(rule => formatRule(rule)).join('\n'))
     },
     'setup rules add': async interaction => {
       if (!interaction.inCachedGuild()) return
@@ -228,7 +228,7 @@ export const rulesFeature: Feature = {
         await interaction.reply({ content: t(locales, 'rules.none'), flags: MessageFlags.Ephemeral })
         return
       }
-      await replyInChunks(interaction, [...rules.map(rule => formatRule(rule, locales, true)), t(locales, 'rules.ping_legend')].join('\n'), true)
+      await replyInChunks(interaction, [...rules.map(rule => formatRule(rule, true)), t(locales, 'rules.ping_legend')].join('\n'), true)
     },
   },
   autocomplete: {

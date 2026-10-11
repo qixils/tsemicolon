@@ -519,6 +519,10 @@ export const starboardFeature: Feature = {
       if (!message.guildId) return
       removeFromBoards(message, starboardsFor(message.guildId)).catch(error => console.error('Starboard clear failed:', error))
     })
+    client.on(Events.ChannelDelete, channel => {
+      // posts are removed by the cascade
+      if (!channel.isDMBased()) db().prepare('DELETE FROM starboards WHERE guild_id = ? AND channel_id = ?').run(channel.guildId, channel.id)
+    })
     client.on(Events.MessageReactionRemoveEmoji, reaction => {
       const guildId = reaction.message.guildId
       if (!guildId) return

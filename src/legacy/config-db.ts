@@ -273,6 +273,7 @@ const importTasks = (legacy: DatabaseSync) => {
         remindAt: runAt,
         createdAt: messageId ? SnowflakeUtil.timestampFrom(messageId) : runAt,
         hidden: 1,
+        locale: null,
       })
       reminders++
     } else if (path === 'cogs.utils.time.unmute') {

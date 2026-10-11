@@ -1,4 +1,5 @@
-import type { PokemonEntry } from './dex.js'
+import type { MaybeLocales } from '../i18n.js'
+import { pokemonName, type PokemonEntry } from './dex.js'
 import type { Rng } from '../random.js'
 
 export type Gender = 'male' | 'female' | 'none'
@@ -46,9 +47,9 @@ export const genderFromCode = (code: string): Gender =>
   code === 'm' ? 'male' : code === 'f' ? 'female' : 'none'
 
 /** Text representation of the variant i.e. `Attack Deoxys (#10001) ♀ ✨` */
-export const describeVariant = (entry: PokemonEntry, variant: Variant) =>
+export const describeVariant = (entry: PokemonEntry, variant: Variant, locales: MaybeLocales) =>
   [
-    `${entry.name} (#${entry.id})`,
+    `${pokemonName(entry, locales)} (#${entry.id})`,
     GENDER_SYMBOLS[variant.gender],
     variant.shiny ? SHINY_SYMBOL : '',
   ].filter(Boolean).join(' ')

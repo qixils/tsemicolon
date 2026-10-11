@@ -213,7 +213,7 @@ const quickAction = async (interaction: MessageComponentInteraction<'cached'>, a
 
       const report = await interaction.channel?.messages.fetch(reportId).catch(() => null)
       await report?.edit(annotate(report, t(publicLocales, 'report.action.banned', { moderator }), ['ban', 'kick'], publicLocales))
-      await interaction.update({ content: t(publicLocales, 'report.ban.done', { user: `<@${userId}>` }), components: [] })
+      await interaction.update({ content: t(viewerLocales, 'report.ban.done', { user: `<@${userId}>` }), components: [] })
       return
     }
   }
@@ -313,7 +313,7 @@ export const reportsFeature: Feature = {
     },
   },
   attach(client) {
-    client.on('messageReactionAdd', async (reaction, user, details) => {
+    client.on('messageReactionAdd', async (reaction, user) => {
       const { emoji, message } = reaction
       if (!emoji.name) return
       if (!/^(?:00|zz)_report_to_mods$/i.test(emoji.name)) return
