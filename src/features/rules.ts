@@ -88,20 +88,20 @@ const numberOption = {
 
 export const rulesFeature: Feature = {
   commands: [{
-    ...localizedName('command.share.name'),
-    ...localizedDescription('command.share.description'),
+    ...localizedName('command.rule.name'),
+    ...localizedDescription('command.rule.description'),
     type: ApplicationCommandType.ChatInput,
     contexts: [InteractionContextType.Guild],
     options: [
       {
         ...numberOption,
-        ...localizedName('command.share.option.rule.name'),
-        ...localizedDescription('command.share.option.rule.description'),
+        ...localizedName('command.rule.option.rule.name'),
+        ...localizedDescription('command.rule.option.rule.description'),
       },
       {
         type: ApplicationCommandOptionType.User,
-        ...localizedName('command.share.option.user.name'),
-        ...localizedDescription('command.share.option.user.description'),
+        ...localizedName('command.rule.option.user.name'),
+        ...localizedDescription('command.rule.option.user.description'),
         required: true,
       },
     ],
@@ -163,7 +163,7 @@ export const rulesFeature: Feature = {
     ],
   }],
   chat: {
-    share: async interaction => {
+    rule: async interaction => {
       if (!interaction.inCachedGuild()) return
       const locales = [interaction.locale, interaction.guildLocale]
       const key = `${interaction.guildId}:${interaction.user.id}`
@@ -240,7 +240,7 @@ export const rulesFeature: Feature = {
     },
   },
   autocomplete: {
-    'share': suggestRules,
+    'rule': suggestRules,
     'setup rules edit': suggestRules,
     'setup rules remove': suggestRules,
     'setup rules ping': suggestRules,

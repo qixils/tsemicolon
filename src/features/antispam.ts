@@ -57,6 +57,9 @@ const fingerprint = (message: Message<true>): string => {
   return '' // !?
 }
 
+/** Whether the message was flagged for its images rather than its text */
+const isImageSpam = (message: Message<true>) => fingerprint(message).startsWith(`${message.guildId}:${message.author.id}:images:`)
+
 const alertChannel = (message: Message<true>) =>
   getSettingChannel(message.guild, 'antispam_channel') ?? getSettingChannel(message.guild, 'reports_channel')
 
@@ -84,7 +87,11 @@ const punish = async (message: Message<true>, messages: Message<true>[]) => {
   const locales = [message.guild.preferredLocale]
   const { member } = message
   const canMute = member?.moderatable && message.guild.members.me?.permissionsIn(message.channel).has(PermissionFlagsBits.ModerateMembers)
+  // if we can't mute them then there's no point deleting their messages
+  //  cus it just tells them we're watching them & they should change it up
+  //  UNLESS it's images in which case it's probably mrbeast hijacked account
   const canDelete = message.guild.members.me?.permissionsIn(message.channel).has(PermissionFlagsBits.ManageMessages)
+    && (canMute || isImageSpam(message))
 
   let promises: Promise<any>[] = []
 
@@ -104,8 +111,8 @@ const punish = async (message: Message<true>, messages: Message<true>[]) => {
     .setColor(ALERT_COLOR)
     .setAuthor({ name: message.author.tag, iconURL: message.author.displayAvatarURL({ extension: 'png', size: 128 }) })
     .setDescription(sample)
-    .setFooter({ text: t(locales, 'antispam.footer', { count: messages.length }) })
     .setTimestamp(message.createdAt)
+  if (canDelete) embed.setFooter({ text: t(locales, 'antispam.footer', { count: messages.length }) })
   const lift = new ButtonBuilder()
     .setCustomId(customId(NAMESPACE, 'lift', message.author.id))
     .setStyle(ButtonStyle.Secondary)

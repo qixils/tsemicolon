@@ -27,17 +27,17 @@ Add Reactions, Embed Links, and Read Message History
 
 Setup in `.env` or environment variables.
 
-| Variable    | Default      | Purpose                                                       |
-| ----------- | ------------ | ------------------------------------------------------------- |
-| `TOKEN`     | **required** |                                                               |
-| `CLIENT_ID` | **required** | Command registration                                          |
-| `DATA_DIR`  | `data`       | Path to where the bot keeps its database and caches           |
-| `OWNER_ID`  | undefined    | User ID snowflake of who can DM the bot `logout` and `update` |
+| Variable         | Default      | Purpose                                                       |
+| ---------------- | ------------ | ------------------------------------------------------------- |
+| `TOKEN`          | **required** |                                                               |
+| `APPLICATION_ID` | **required** | Command registration                                          |
+| `DATA_DIR`       | `data`       | Path to where the bot keeps its database and caches           |
+| `OWNER_ID`       | undefined    | User ID snowflake of who can DM the bot `logout` and `update` |
 
 ### Building & Running
 
 ```sh
-npm ci
+npm i
 npm run build
 npm start  # or `node dist/index.js`
 ```

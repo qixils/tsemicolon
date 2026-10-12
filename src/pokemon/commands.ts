@@ -7,14 +7,17 @@ import {
   EmbedBuilder,
   InteractionContextType,
   MessageFlags,
+  MessagePayload,
   TimestampStyles,
   escapeMarkdown,
   time,
+  type InteractionEditReplyOptions,
+  type InteractionReplyOptions,
 } from 'discord.js'
 import { localizedDescription, localizedName, type Feature } from '../feature.js'
 import { formatNumber, t } from '../i18n.js'
 import { randomItem, seededRng } from '../random.js'
-import { getDex, startDex, statName, typeName, type Dex, type PokemonEntry } from './dex.js'
+import { getDex, loadedDex, startDex, statName, typeName, type Dex, type PokemonEntry } from './dex.js'
 import { getSprite } from './sprites.js'
 import { getStore } from './storage.js'
 import { describeVariant, rollVariant, variantCount, type Variant } from './variants.js'
@@ -72,17 +75,25 @@ const attachSprite = async (embed: EmbedBuilder, entry: PokemonEntry, variant: V
 export const handlePokemonSearch = async (interaction: ChatInputCommandInteraction) => {
   const locales = [interaction.locale, interaction.guildLocale]
   const query = interaction.options.getString('pokemon', true)
-  await interaction.deferReply()
 
-  const dex = await getDex()
+  // avoid immediately deferring unless we haven't loaded the dex yet
+  let dex = loadedDex()
+  if (!dex) {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral })
+    dex = await getDex()
+  }
+
   const entry = dex.find(query)
   if (!entry) {
-    await interaction.editReply({
-      content: t(locales, 'pokemon.search.not_found', { query: escapeMarkdown(query) }),
-      allowedMentions: { parse: [] },
-    })
+    const content = t(locales, 'pokemon.search.not_found', { query: escapeMarkdown(query) })
+    if (interaction.deferred) await interaction.editReply({ content })
+    else await interaction.reply({ content, flags: MessageFlags.Ephemeral })
     return
   }
+
+  // now that we know the input is valid we can defer publicly (if we didn't defer yet)
+  const deferredPrivately = interaction.deferred
+  if (!deferredPrivately) await interaction.deferReply()
 
   const variant = rollVariant(entry)
   const embed = baseEmbed(interaction)
@@ -98,15 +109,21 @@ export const handlePokemonSearch = async (interaction: ChatInputCommandInteracti
     embed.addFields({
       name: t(locales, 'pokemon.search.stats'),
       value: [...entry.stats, { name: t(locales, 'pokemon.stat.total'), value: total }]
-        .map(stat => t(locales, 'pokemon.search.stat_line', { stat: statName(stat.name, locales), value: stat.value })).join('\n'),
-      inline: true,
+        .map(stat => t(locales, 'pokemon.search.stat_line', { stat: statName(stat.name, locales), value: stat.value })).join(' · '),
     })
   }
 
   const files = await attachSprite(embed, entry, variant)
   if (files.length === 0) embed.setDescription(t(locales, 'pokemon.search.no_sprite'))
 
-  await interaction.editReply({ embeds: [embed], files })
+  const payload = { embeds: [embed], files } satisfies InteractionReplyOptions | InteractionEditReplyOptions
+  if (deferredPrivately) {
+    // can't just go un-ephemeral so we need to make a new reply
+    await interaction.deleteReply()
+    await interaction.followUp(payload)
+  } else {
+    await interaction.editReply(payload)
+  }
 }
 
 export const handlePokemonCatch = async (interaction: ChatInputCommandInteraction) => {

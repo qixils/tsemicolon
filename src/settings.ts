@@ -12,6 +12,7 @@ import {
   type ChatInputCommandInteraction,
   type Guild,
   type GuildMember,
+  type Client,
   type GuildTextBasedChannel,
   type MessageComponentInteraction,
   type OverwriteResolvable,
@@ -20,6 +21,7 @@ import {
 import { withSchema } from './db.js'
 import { customId, localizedDescription, localizedName, type ChatHandler, type Feature } from './feature.js'
 import { t, type MaybeLocales, type MessageKey } from './i18n.js'
+import { registerLegacyImporter } from './legacy.js'
 import { SENDABLE_TEXT_CHANNEL_TYPES, postableChannel } from './util/discord.js'
 
 const db = withSchema(`
@@ -203,8 +205,7 @@ export const configureChannel = (setup: ChannelSetup): ChatHandler => {
     if (!me) return
 
     const channel = interaction.options.getChannel('channel', false, [ChannelType.GuildText, ChannelType.GuildAnnouncement])
-      ?? guild.channels.cache.find((existing): existing is GuildTextBasedChannel =>
-        existing.type === ChannelType.GuildText && existing.name === setup.defaultName)
+      ?? defaultChannel(guild, setup)
     if (channel) {
       await interaction.reply({ content: assignChannel(guild, locales, setup, channel), flags: MessageFlags.Ephemeral })
       return
@@ -228,6 +229,31 @@ export const configureChannel = (setup: ChannelSetup): ChatHandler => {
     })
   }
 }
+
+/** Finds a text channel with the default name of a channel setup */
+const defaultChannel = (guild: Guild, setup: ChannelSetup) =>
+  guild.channels.cache.find((existing): existing is GuildTextBasedChannel =>
+    existing.type === ChannelType.GuildText && existing.name === setup.defaultName)
+
+/**
+ * On first startup, hooks up any unconfigured settings to existing channels with the default names (i.e. `semicolon_joins`).
+ */
+export const registerDefaultChannelLinks = () => registerLegacyImporter({
+  id: 'defaults:channels',
+  run: async (_dir, client: Client<true>) => {
+    let linked = 0
+    for (const guild of client.guilds.cache.values()) {
+      for (const setup of channelSetups.values()) {
+        if (getSetting(guild.id, setup.setting) !== undefined) continue
+        const channel = defaultChannel(guild, setup)
+        if (!channel || !postableChannel(guild, channel.id, [PermissionFlagsBits.EmbedLinks])) continue
+        setSetting(guild.id, setup.setting, channel.id)
+        linked++
+      }
+    }
+    return `${linked} default channels across ${client.guilds.cache.size} servers`
+  },
+})
 
 const DISABLEABLE: Record<string, { name: MessageKey, keys: SettingKey[], note?: MessageKey }> = {
   joinlog: { name: 'command.setup.joinlog.name', keys: ['joinlog_channel'] },

@@ -3,3 +3,4 @@ dist/
 /semicolon-py/
 /data/
 /legacy_data/
+.env

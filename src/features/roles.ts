@@ -316,7 +316,11 @@ export const rolesFeature: Feature = {
       if (!interaction.inCachedGuild() || !await checkManageRoles(interaction)) return
       const locales = [interaction.locale, interaction.guildLocale]
       if (flairOptions(interaction.member).length === 0) {
-        await interaction.reply({ content: t(locales, 'flair.none'), flags: MessageFlags.Ephemeral })
+        let content = t(locales, 'flair.none')
+        if (interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) {
+          content += `\n*${t(locales, 'flair.mod_tip')}*`
+        }
+        await interaction.reply({ content, flags: MessageFlags.Ephemeral })
         return
       }
       await interaction.reply({ ...flairPage(interaction.member, 0, locales), flags: MessageFlags.Ephemeral })

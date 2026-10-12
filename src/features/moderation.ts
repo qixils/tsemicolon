@@ -192,19 +192,29 @@ export const moderationFeature: Feature = {
       if (duration <= 0) return fail(interaction, 'mute.in_past')
       if (duration > MAX_TIMEOUT_MILLIS) return fail(interaction, 'mute.too_long')
 
-      await target.timeout(duration, auditReason(interaction, 'command.mute.name'))
-      await interaction.reply({
-        content: t(locales, 'mute.done', {
-          user: target.toString(),
-          until: time(until, TimestampStyles.FullDateShortTime),
-          relative: time(until, TimestampStyles.RelativeTime),
-        }),
-        flags: MessageFlags.Ephemeral,
+      const guildChannel = interaction.channel
+      const targetCanView = guildChannel && target?.permissionsIn(guildChannel).has(PermissionFlagsBits.ViewChannel)
+      await interaction.deferReply({
+        // to make the mod's life a little easier we'll hide the message by default if the target could see it
+        // they can always delete it themselves
+        ...(targetCanView && { flags: MessageFlags.Ephemeral }),
       })
+
+      await target.timeout(duration, auditReason(interaction, 'command.mute.name'))
+
       const reason = interaction.options.getBoolean('notify_user') ? interaction.options.getString('reason') : null
-      if (!await notifyMuted(target, until, reason)) {
-        await interaction.followUp({ content: t(locales, 'mute.dm_failed'), flags: MessageFlags.Ephemeral })
-      }
+      const notified = await notifyMuted(target, until, reason)
+
+      const lines = [t(locales, 'mute.done', {
+        user: target.toString(),
+        until: time(until, TimestampStyles.FullDateShortTime),
+        relative: time(until, TimestampStyles.RelativeTime),
+      })]
+      if (!notified) lines.push(t(locales, reason ? 'mute.dm_failed_reason' : 'mute.dm_failed'));
+
+      await interaction.editReply({
+        content: lines.join('\n'),
+      })
     },
   },
   attach(client) {

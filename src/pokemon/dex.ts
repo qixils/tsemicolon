@@ -322,6 +322,9 @@ const load = async (force: boolean): Promise<Dex> => {
   return current
 }
 
+/** the dex if it has finished loading */
+export const loadedDex = (): Dex | undefined => current
+
 /** loads the cached dex or fetches it */
 export const getDex = async (): Promise<Dex> => {
   if (current) return current

@@ -1,7 +1,7 @@
 import { Client, Events, GatewayIntentBits, Partials, REST, Routes, type RESTPutAPIApplicationCommandsJSONBody } from 'discord.js';
 import 'dotenv/config';
-import { mkdir, readFile, writeFile } from 'fs/promises';
-import { isDeepStrictEqual } from 'util';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { DATA_DIR, LEGACY_DATA_DIR, LEGACY_IMPORT_LOG, OWNER_ID } from './config.js';
 import { closeDb } from './db.js';
 import { FeatureRegistry, replyWithError } from './feature.js';
@@ -24,10 +24,11 @@ import { registerConfigImports } from './legacy/config-db.js';
 import { runLegacyImports } from './legacy.js';
 import { pokemonFeature } from './pokemon/commands.js';
 import { registerPokemonImport } from './pokemon/legacy-import.js';
-import { settingsFeature } from './settings.js';
+import { registerDefaultChannelLinks, settingsFeature } from './settings.js';
+import { join } from 'node:path';
 
-const { CLIENT_ID, TOKEN } = process.env;
-if (!CLIENT_ID) throw Error('No client id');
+const { APPLICATION_ID, TOKEN } = process.env;
+if (!APPLICATION_ID) throw Error('No client id');
 if (!TOKEN) throw Error('No token');
 
 await mkdir(DATA_DIR, { recursive: true })
@@ -95,7 +96,7 @@ type CommandScopes = Record<string, RESTPutAPIApplicationCommandsJSONBody>
 
 const commands: CommandScopes = { [GLOBAL]: registry.commands, ...registry.guildCommands }
 
-const cmdsPath = "saved_commands.json"
+const cmdsPath = join(DATA_DIR, "saved_commands.json")
 let oldCommands: CommandScopes = {}
 try {
   const file = await readFile(cmdsPath)
@@ -114,7 +115,7 @@ for (const scope of new Set([...Object.keys(commands), ...Object.keys(oldCommand
   if (isDeepStrictEqual(body, oldCommands[scope] ?? [])) continue
 
   try {
-    const route = scope === GLOBAL ? Routes.applicationCommands(CLIENT_ID) : Routes.applicationGuildCommands(CLIENT_ID, scope)
+    const route = scope === GLOBAL ? Routes.applicationCommands(APPLICATION_ID) : Routes.applicationGuildCommands(APPLICATION_ID, scope)
     await rest.put(route, { body });
     if (body.length > 0) savedCommands[scope] = body
     else delete savedCommands[scope]
@@ -132,6 +133,7 @@ if (!isDeepStrictEqual(savedCommands, oldCommands)) await writeFile(cmdsPath, JS
 registry.attach(client)
 registerPokemonImport()
 registerConfigImports()
+registerDefaultChannelLinks()
 
 client.once(Events.ClientReady, async readyClient => {
   console.log(`Logged in as ${readyClient.user.tag}!`);
