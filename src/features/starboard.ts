@@ -7,6 +7,7 @@ import {
   DiscordAPIError,
   EmbedBuilder,
   Events,
+  GatewayDispatchEvents,
   MessageFlags,
   PermissionFlagsBits,
   ReactionType,
@@ -19,7 +20,7 @@ import {
   type PartialMessage,
   type PartialMessageReaction,
 } from 'discord.js'
-import { int, optionalText, text, withSchema, type Row } from '../db.js'
+import { int, optionalText, text, transaction, withSchema, type Row } from '../db.js'
 import { localizedDescription, localizedName, type Feature } from '../feature.js'
 import { formatNumber, t, type MaybeLocales } from '../i18n.js'
 import { SENDABLE_TEXT_CHANNEL_TYPES, addMediaPreview, postableChannel, truncate } from '../util/discord.js'
@@ -43,9 +44,13 @@ const db = withSchema('starboard', [`
     starboard_id INTEGER NOT NULL REFERENCES starboards (id) ON DELETE CASCADE,
     message_id   TEXT    NOT NULL,
     post_id      TEXT    NOT NULL,
+    -- the starred message's channel or thread, and the thread's parent channel
+    channel_id   TEXT    NOT NULL,
+    parent_id    TEXT,
     PRIMARY KEY (starboard_id, message_id)
   ) WITHOUT ROWID;
-  CREATE INDEX IF NOT EXISTS starboard_posts_by_post ON starboard_posts (starboard_id, post_id);
+  CREATE INDEX IF NOT EXISTS starboard_posts_by_message ON starboard_posts (message_id);
+  CREATE INDEX IF NOT EXISTS starboard_posts_by_post ON starboard_posts (post_id);
 
   -- the old db had one starboard per server and didn't record which server a
   -- post belonged to; these get claimed by that server's legacy starboard on use
@@ -124,21 +129,23 @@ export const addLegacyPosts = (posts: { messageId: string, postId: string }[]) =
   for (const { messageId, postId } of posts) insert.run(messageId, postId)
 }
 
-const findPost = (board: Starboard, messageId: string): string | null => {
-  const row = db().prepare('SELECT post_id FROM starboard_posts WHERE starboard_id = ? AND message_id = ?').get(board.id, messageId)
+const findPost = (board: Starboard, message: Message | PartialMessage): string | null => {
+  const row = db().prepare('SELECT post_id FROM starboard_posts WHERE starboard_id = ? AND message_id = ?').get(board.id, message.id)
   if (row) return text(row, 'post_id')
   if (!board.legacy) return null
 
-  const legacy = db().prepare('SELECT post_id FROM legacy_starboard_posts WHERE message_id = ?').get(messageId)
+  const legacy = db().prepare('SELECT post_id FROM legacy_starboard_posts WHERE message_id = ?').get(message.id)
   if (!legacy) return null
   const postId = text(legacy, 'post_id')
-  db().prepare('DELETE FROM legacy_starboard_posts WHERE message_id = ?').run(messageId)
-  savePost(board, messageId, postId)
+  db().prepare('DELETE FROM legacy_starboard_posts WHERE message_id = ?').run(message.id)
+  savePost(board, message, postId)
   return postId
 }
 
-const savePost = (board: Starboard, messageId: string, postId: string) => {
-  db().prepare('INSERT OR REPLACE INTO starboard_posts (starboard_id, message_id, post_id) VALUES (?, ?, ?)').run(board.id, messageId, postId)
+const savePost = (board: Starboard, message: Message | PartialMessage, postId: string) => {
+  const parentId = message.channel?.isThread() ? message.channel.parentId : null
+  db().prepare('INSERT OR REPLACE INTO starboard_posts (starboard_id, message_id, post_id, channel_id, parent_id) VALUES (?, ?, ?, ?, ?)')
+    .run(board.id, message.id, postId, message.channelId, parentId)
 }
 
 const forgetPost = (board: Starboard, messageId: string) => {
@@ -250,7 +257,7 @@ const updateBoard = async (board: Starboard, message: Message<true>, count: numb
   const channel = postableChannel(message.guild, board.channelId, [PermissionFlagsBits.EmbedLinks])
   if (!channel || message.channelId === board.channelId) return
 
-  const postId = findPost(board, message.id)
+  const postId = findPost(board, message)
   const qualifies = count >= thresholdFor(board, message.id)
 
   if (postId) {
@@ -275,7 +282,7 @@ const updateBoard = async (board: Starboard, message: Message<true>, count: numb
   // don't expose age-restricted channels
   if (!qualifies || (isNsfw(message.channel) && !isNsfw(channel))) return
   const post = await channel.send(buildPost(board, message, count))
-  savePost(board, message.id, post.id)
+  savePost(board, message, post.id)
 }
 
 const onReaction = async (reaction: MessageReaction | PartialMessageReaction) => {
@@ -294,13 +301,22 @@ const onReaction = async (reaction: MessageReaction | PartialMessageReaction) =>
   }
 }
 
-const forgetPosts = (guildId: string, channelId: string, postIds: string[]) => {
-  const boards = starboardsFor(guildId).filter(board => board.channelId === channelId)
-  if (boards.length === 0) return
-  const forget = db().prepare('DELETE FROM starboard_posts WHERE starboard_id = ? AND post_id = ?')
-  for (const board of boards) {
-    for (const postId of postIds) forget.run(board.id, postId)
-  }
+/** Forgets deleted messages, whether they were starred messages or posts on a starboard */
+const forgetDeleted = (messageIds: string[]) => {
+  // a deleted message's starboard post is left up, it just won't be updated anymore
+  const forget = db().prepare('DELETE FROM starboard_posts WHERE message_id = ? OR post_id = ?')
+  const forgetLegacy = db().prepare('DELETE FROM legacy_starboard_posts WHERE message_id = ?')
+  transaction(db(), () => {
+    for (const id of messageIds) {
+      forget.run(id, id)
+      forgetLegacy.run(id)
+    }
+  })
+}
+
+/** Forgets starred messages from a deleted channel or thread */
+const forgetChannel = (channelId: string) => {
+  db().prepare('DELETE FROM starboard_posts WHERE channel_id = ? OR parent_id = ?').run(channelId, channelId)
 }
 
 const removeFromBoards = async (message: Message | PartialMessage, boards: Starboard[]) => {
@@ -308,7 +324,7 @@ const removeFromBoards = async (message: Message | PartialMessage, boards: Starb
   if (!guild) return
   for (const board of boards) {
     await withLock(`${board.id}:${message.id}`, async () => {
-      const postId = findPost(board, message.id)
+      const postId = findPost(board, message)
       if (!postId) return
       forgetPost(board, message.id)
       const channel = postableChannel(guild, board.channelId)
@@ -548,14 +564,21 @@ export const starboardFeature: Feature = {
       removeFromBoards(message, starboardsFor(message.guildId)).catch(error => console.error('Starboard clear failed:', error))
     })
     client.on(Events.MessageDelete, message => {
-      if (message.guildId) forgetPosts(message.guildId, message.channelId, [message.id])
+      if (message.guildId) forgetDeleted([message.id])
     })
-    client.on(Events.MessageBulkDelete, (messages, channel) => {
-      forgetPosts(channel.guildId, channel.id, [...messages.keys()])
+    client.on(Events.MessageBulkDelete, messages => {
+      forgetDeleted([...messages.keys()])
     })
     client.on(Events.ChannelDelete, channel => {
-      // posts are removed by the cascade
-      if (!channel.isDMBased()) db().prepare('DELETE FROM starboards WHERE guild_id = ? AND channel_id = ?').run(channel.guildId, channel.id)
+      if (channel.isDMBased()) return
+      // if this channel was a starboard, clear it (& its posts via cascade)
+      db().prepare('DELETE FROM starboards WHERE guild_id = ? AND channel_id = ?').run(channel.guildId, channel.id)
+      // if this channel had starboard posts then clear them
+      forgetChannel(channel.id)
+    })
+    // discord.js only reports deleted threads that it has cached, which archived ones usually aren't
+    client.on(Events.Raw, (packet: { t: string | null, d?: { id?: string } }) => {
+      if (packet.t === GatewayDispatchEvents.ThreadDelete && packet.d?.id) forgetChannel(packet.d.id)
     })
     // the board's other emojis may still hold the post up, so this gets recounted like any other reaction change
     client.on(Events.MessageReactionRemoveEmoji, handle)

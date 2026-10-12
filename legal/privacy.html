@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semicolon Privacy Policy</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { max-width: 40em; margin: 2em auto; padding: 0 1em; font-family: system-ui, sans-serif; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<h1>semicolon Privacy Policy</h1>
+<p><em>Last updated October 12, 2026</em></p>
+
+<p>
+  semicolon is a Discord bot run by one person as a hobby.
+  It tries to store as little about you as it can.
+  It doesn't sell your data, show ads, or use analytics or tracking.
+  This page explains what it does store and why.
+  Using semicolon also means agreeing to the <a href="terms.html">Terms of Service</a>.
+</p>
+
+<h2>What the bot stores</h2>
+<p>The bot tries to store only what is necessary for its functionality.</p>
+<ul>
+  <li>
+    <strong>Starboard:</strong> if you are in a server with this feature enabled, the bot stores the fact that an amount of users have reacted to a certain message ID.
+    This ID may correspond to a message you have created. It does not store who created the message, their name, or the contents of the message, only its unique identifier.
+    If this message gets deleted, the bot too will delete what it knows of the message.
+  </li>
+  <li>
+    <strong>Reminders:</strong> if you ask the bot to remind you of something, it will store your user ID, the content of the reminder, when it should go off, your language, and where you set it (server, channel and message IDs).
+    Public reminders are stored until they have elapsed to allow other users to join it.
+    Private reminders are stored until they have elapsed or have been cancelled.
+    If a reminder fails to get delivered, for example because you have DMs disabled, then for public reminders the bot will post it publicly in the channel you started it in, then delete the data.
+    If it was a private reminder set within a server channel then the bot will attempt to contact you there to access the reminder once via a button exclusive to you.
+    The reminder is deleted after you click the button or after a month.
+    For private reminders initiated in DMs, the bot will continue attempting to contact you for a month before removing the reminder from the database.
+  </li>
+  <li>
+    <strong>Polls:</strong> if you use this command and the bot doesn't understand your input, it will store your input as a draft so you can quickly access and edit it.
+    Drafts are deleted once the poll is posted, or after 24 hours.
+  </li>
+  <li>
+    <strong>Pokémon:</strong> if you use the catch command then your user ID, which Pokémon you've caught and when, and your display name are stored so they can be shown on the leaderboard.
+  </li>
+</ul>
+
+<p>The rest of the bot's functionality is stored per-server and managed by its moderators.</p>
+<ul>
+  <li>
+    <strong>Channels:</strong> the bot stores the IDs of what channels it should post member logs in.
+    Database entries are cleared when the corresponding channels are deleted.
+  </li>
+  <li>
+    <strong>Rules:</strong> the bot stores what rules should be offered to members trying to report a message.
+  </li>
+  <li>
+    <strong>Roles:</strong> the bot stores the IDs of what roles you want members to be able to self-assign and a description for them.
+    Database entries are cleared when the corresponding roles are deleted.
+  </li>
+  <li>
+    <strong>Subscriptions:</strong> the bot stores what RSS feeds to check for new items and the IDs of what channels to post them in.
+    Database entries are cleared when the corresponding channels are deleted.
+  </li>
+  <li>
+    <strong>Antispam:</strong> on top of channel storage, the bot stores how many repetitive messages should trigger an automatic mute.
+  </li>
+  <li>
+    <strong>Starboards:</strong> the bot stores the configuration including channel ID, emoji, and threshold.
+    It also stores previously configured emojis and thresholds, as well as all message IDs that have hit the threshold and been posted in the channel by the bot.
+    Database entries are cleared when the corresponding message(s) or channel(s) are deleted.
+  </li>
+</ul>
+
+<h2>What the bot doesn't store</h2>
+<p>
+  To run its moderation features, semicolon can read messages and the member list in servers it's in.
+  Antispam remembers recent messages for about 20 seconds to spot repeats.
+  To provide server administrators logs, the bot stores recent messages and members in memory
+  so it can show what changed when something is edited or deleted.
+  These are sent to the server moderators who may retain the logs.
+</p>
+<p>
+  When something breaks, the bot writes an error log that may include Discord IDs, server names, and stacktraces.
+  These are used to fix bugs and removed afterwards.
+</p>
+
+<h2>Features server administrators control</h2>
+<p>Server administrators can turn on features that post information about members into their own server's channels:</p>
+<ul>
+  <li>Logs of joins, leaves, bans, timeouts, role changes and username changes</li>
+  <li>Logs of edited and deleted messages, including what they said</li>
+  <li>Reports, which include the reported message</li>
+  <li>Antispam alerts, which include the flagged messages</li>
+  <li>Starboard posts, which repost the starred message</li>
+</ul>
+<p>
+  These messages are stored by Discord in that server, not by semicolon. The bot doesn't keep its own copy.
+  That server's administrators decide who can see them and how long they're kept.
+  If you have questions about them, ask the server's administrators.
+</p>
+
+<h2>Other services</h2>
+<ul>
+  <li><strong>Discord:</strong> semicolon runs on Discord, so <a href="https://discord.com/privacy">Discord's Privacy Policy</a> applies too.</li>
+  <li>
+    <strong>PluralKit:</strong> the bot sends message IDs to <a href="https://pluralkit.me/">PluralKit</a> to check whether a message was reposted by PluralKit.
+    This helps it cleanup antispam alerts and avoids false deletion logs.
+  </li>
+</ul>
+<p>The bot also downloads data from PokéAPI, YouTube, and xkcd, but it doesn't send them anything about you.</p>
+
+<h2>Deleting your data</h2>
+<p>
+  Send a DM to <strong>qixils</strong> on Discord and I'll delete everything semicolon has stored about you.
+  If you provide your server ID then I'll verify through the bot that you have moderator permissions within that server and delete everything semicolon has stored about it.
+</p>
+<p>Deleting your data doesn't remove messages the bot has already posted in servers, such as logs or starboard posts. Ask that server's administrators about those.</p>
+
+<h2>Changes</h2>
+<p>If this policy changes, I'll update the date at the top of this page.</p>
+
+<h2>Contact</h2>
+<p>For questions or deletion requests, please send a DM to <strong>qixils</strong> on Discord.</p>
+
+</body>
+</html>

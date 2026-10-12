@@ -27,6 +27,8 @@ const TICK = 5000
 const REATTEMPT_AFTER_MILLIS = 24 * 60 * 60 * 1000
 /** if we fail to DM a user this many times we give up */
 const MAX_ATTEMPTS = 30
+/** hidden reminders posted in a channel are deleted if their owner doesn't view them within this time */
+const UNVIEWED_LIFETIME_MILLIS = REATTEMPT_AFTER_MILLIS * MAX_ATTEMPTS
 
 const db = withSchema('reminders', [`
   CREATE TABLE IF NOT EXISTS reminders (
@@ -41,7 +43,9 @@ const db = withSchema('reminders', [`
     content    TEXT    NOT NULL,
     remind_at  INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
-    status     TEXT    NOT NULL DEFAULT 'pending', -- pending | sent | cancelled | failed
+    -- pending | cancelled (so others can still join) | sent (until its owner views it)
+    status     TEXT    NOT NULL DEFAULT 'pending',
+    -- private reminders have no public announcement to join from, and their content is only shown to their owner
     hidden     INTEGER NOT NULL DEFAULT 0,
     -- the recipient's locale, for the reminder DM
     locale     TEXT,
@@ -53,7 +57,7 @@ const db = withSchema('reminders', [`
   CREATE INDEX IF NOT EXISTS reminders_by_parent ON reminders (parent_id, user_id);
 `])
 
-type Status = 'pending' | 'sent' | 'cancelled' | 'failed'
+type Status = 'pending' | 'sent' | 'cancelled'
 
 export interface Reminder {
   id: number
@@ -106,8 +110,8 @@ const getReminder = (id: number): Reminder | undefined => {
 const setStatus = (id: number, status: Exclude<Status, 'pending'>): boolean =>
   Number(db().prepare("UPDATE reminders SET status = ? WHERE id = ? AND status = 'pending'").run(status, id).changes) > 0
 
-const setHidden = (id: number): boolean =>
-  Number(db().prepare("UPDATE reminders SET hidden = 1 WHERE id = ?").run(id).changes) > 0
+const deleteReminder = (id: number): boolean =>
+  Number(db().prepare('DELETE FROM reminders WHERE id = ?').run(id).changes) > 0
 
 const setMessage = (id: number, messageId: string | null) => {
   db().prepare('UPDATE reminders SET message_id = ? WHERE id = ?').run(messageId, id)
@@ -184,10 +188,13 @@ const onButton = async (interaction: ButtonInteraction, action: string, reminder
 
     case 'cancel': {
       if (!isOwner) return ephemeral(t(locales, 'remind.owner_only'))
-      if (!setStatus(reminder.id, 'cancelled')) {
-        return ephemeral(t(locales, reminder.status === 'sent' || reminder.status === 'failed'
-          ? 'remind.already_sent'
-          : 'remind.already_cancelled'))
+      // others can still join a public reminder, so it's kept until it would've gone off
+      const joinable = !reminder.hidden && reminder.messageId !== null
+      const cancelled = joinable
+        ? setStatus(reminder.id, 'cancelled')
+        : Number(db().prepare("DELETE FROM reminders WHERE id = ? AND status = 'pending'").run(reminder.id).changes) > 0
+      if (!cancelled) {
+        return ephemeral(t(locales, reminder.status === 'sent' ? 'remind.already_sent' : 'remind.already_cancelled'))
       }
       // the original message stays as-is (it may be public), only the owner hears about the cancellation
       await interaction.update({ components: disableClicked(interaction) })
@@ -200,25 +207,36 @@ const onButton = async (interaction: ButtonInteraction, action: string, reminder
 
     case 'hide': {
       if (!isOwner) return ephemeral(t(locales, 'remind.owner_only'))
-      // after a deferred update, the "original" response is the message the button is on
-      await interaction.deferUpdate()
-      await interaction.deleteReply().catch(() => interaction.message.delete())
-      // the announcement is gone, so neither this reminder nor any joined ones should link back to it
-      db().prepare('UPDATE reminders SET message_id = NULL, hidden = 1 WHERE id = ? OR parent_id = ?').run(reminder.id, reminder.id)
-      const pending = reminder.status === 'pending'
-      await interaction.followUp({
-        content: pending ? announcement(reminder, locales) : t(locales, 'remind.hidden'),
-        components: pending ? controls(reminder.id, true, locales) : [],
-        flags: MessageFlags.Ephemeral,
-      })
-      return
+      return hide(interaction, reminder.id, reminder)
     }
 
     case 'show': {
-      if (!isOwner) return ephemeral(t(locales, 'remind.owner_only'))
-      return ephemeral(delivery(reminder, locales))
+      if (!isOwner) return ephemeral(t(locales, 'remind.owner_only'));
+      await interaction.update({ components: disableClicked(interaction) })
+      await interaction.followUp({ content: delivery(reminder, locales), flags: MessageFlags.Ephemeral })
+      // it's been seen now, so it can be deleted
+      deleteReminder(reminder.id)
+      return
     }
   }
+}
+
+/** Deletes a reminder's public announcement. `reminder` is undefined if it was already deleted. */
+const hide = async (interaction: ButtonInteraction, id: number, reminder?: Reminder) => {
+  const locales = [interaction.locale, interaction.guildLocale]
+  // after a deferred update, the "original" response is the message the button is on
+  await interaction.deferUpdate()
+  await interaction.deleteReply().catch(() => interaction.message.delete())
+  // the announcement is gone, so neither this reminder nor any joined ones should link back to it
+  db().prepare('UPDATE reminders SET message_id = NULL, hidden = 1 WHERE id = ? OR parent_id = ?').run(id, id)
+  // nobody can join it anymore, so a cancelled one isn't needed
+  if (reminder?.status === 'cancelled') deleteReminder(id)
+  const pending = reminder?.status === 'pending' ? reminder : null
+  await interaction.followUp({
+    content: pending ? announcement(pending, locales) : t(locales, 'remind.hidden'),
+    components: pending ? controls(id, true, locales) : [],
+    flags: MessageFlags.Ephemeral,
+  })
 }
 
 const jumpLink = (reminder: Reminder) =>
@@ -244,7 +262,7 @@ const deliver = async (client: Client, reminder: Reminder): Promise<boolean> => 
     const user = await client.users.fetch(reminder.userId)
     const sent = await user.send({ content })
     if (sent) {
-      setStatus(reminder.id, 'sent')
+      deleteReminder(reminder.id)
       return true
     }
   } catch {
@@ -268,7 +286,9 @@ const deliver = async (client: Client, reminder: Reminder): Promise<boolean> => 
       }
     : { content: `${mention} ${content}`, allowedMentions })
   if (sent) {
-    setStatus(reminder.id, 'sent')
+    // hidden reminders are kept until their owner clicks to view them
+    if (reminder.hidden) setStatus(reminder.id, 'sent')
+    else deleteReminder(reminder.id)
     return true
   }
 
@@ -282,6 +302,10 @@ const tick = async (client: Client) => {
   ticking = true
   try {
     const now = Date.now()
+    // clear elapsed cancelled reminders (they were only kept so others could join them, which they no longer can)
+    db().prepare("DELETE FROM reminders WHERE status = 'cancelled' AND remind_at <= ?").run(now)
+    // also clear reminders we tried to publicly tag them about but they didnt look at for a month
+    db().prepare("DELETE FROM reminders WHERE status = 'sent' AND COALESCE(retry_at, remind_at) <= ?").run(now - UNVIEWED_LIFETIME_MILLIS)
     const due = db().prepare(`
       SELECT * FROM reminders WHERE status = 'pending' AND COALESCE(retry_at, remind_at) <= ?
       ORDER BY COALESCE(retry_at, remind_at) LIMIT 50
@@ -296,7 +320,7 @@ const tick = async (client: Client) => {
 
       const attempts = int(row, 'attempts') + 1
       if (attempts >= MAX_ATTEMPTS) {
-        setStatus(reminder.id, 'failed')
+        deleteReminder(reminder.id)
         console.warn(`Gave up on reminder ${reminder.id} after ${attempts} failed deliveries`)
       } else {
         db().prepare('UPDATE reminders SET attempts = ?, retry_at = ? WHERE id = ?').run(attempts, now + REATTEMPT_AFTER_MILLIS, reminder.id)
@@ -368,7 +392,7 @@ export const remindersFeature: Feature = {
         content,
         remindAt: at.getTime(),
         createdAt: Date.now(),
-        hidden: ephemeral ? 1 : 0,
+        hidden: unjoinable ? 1 : 0,
         locale: interaction.locale,
       }
       const id = createReminderRow(reminder)
@@ -388,11 +412,14 @@ export const remindersFeature: Feature = {
     [NAMESPACE]: async (interaction, [action = '', id = '']) => {
       if (!interaction.isButton()) return
       const reminder = getReminder(Number(id))
-      if (!reminder) {
-        await interaction.reply({ content: t([interaction.locale, interaction.guildLocale], 'remind.not_found'), flags: MessageFlags.Ephemeral })
-        return
+      if (reminder) {
+        return await onButton(interaction, action, reminder)
       }
-      await onButton(interaction, action, reminder)
+      // finished reminders are deleted, but whoever set one may still want its announcement gone
+      if (action === 'hide' && interaction.message.interactionMetadata?.user.id === interaction.user.id) {
+        return await hide(interaction, Number(id))
+      }
+      await interaction.reply({ content: t([interaction.locale, interaction.guildLocale], 'remind.not_found'), flags: MessageFlags.Ephemeral })
     },
   },
   attach(client) {
