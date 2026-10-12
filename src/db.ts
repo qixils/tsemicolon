@@ -62,18 +62,17 @@ export const migrate = (database: DatabaseSync, name: string, migrations: readon
   })
 }
 
-const schemaNames = new Set<string>()
+const schemas = new Map<string, () => DatabaseSync>()
 
 /**
  * Returns a database accessor that applies `migrations` on first use and to upgrade existing databases.
  * `name` identifies this accessor for versioning, it should not be changed.
  */
 export const withSchema = (name: string, migrations: readonly string[]): (() => DatabaseSync) => {
-  if (schemaNames.has(name)) throw new Error(`Duplicate schema "${name}"`)
-  schemaNames.add(name)
+  if (schemas.has(name)) throw new Error(`Duplicate schema "${name}"`)
 
   let ready = false
-  return (): DatabaseSync => {
+  const accessor = (): DatabaseSync => {
     const database = getDb()
     if (!ready) {
       migrate(database, name, migrations)
@@ -81,6 +80,15 @@ export const withSchema = (name: string, migrations: readonly string[]): (() => 
     }
     return database
   }
+  schemas.set(name, accessor)
+  return accessor
+}
+
+/**
+ * Applies the migrations of every schema registered so far.
+ */
+export const migrateAll = () => {
+  for (const accessor of schemas.values()) accessor()
 }
 
 export type Row = Record<string, SQLOutputValue>

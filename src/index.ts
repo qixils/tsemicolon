@@ -3,7 +3,7 @@ import 'dotenv/config';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { DATA_DIR, LEGACY_DATA_DIR, LEGACY_IMPORT_LOG, OWNER_ID } from './config.js';
-import { closeDb } from './db.js';
+import { closeDb, migrateAll } from './db.js';
 import { FeatureRegistry, replyWithError } from './feature.js';
 import { antispamFeature } from './features/antispam.js';
 import { clearFeature } from './features/clear.js';
@@ -32,6 +32,9 @@ if (!APPLICATION_ID) throw Error('No client id');
 if (!TOKEN) throw Error('No token');
 
 await mkdir(DATA_DIR, { recursive: true })
+
+// to avoid nested transactions let's initialize all tables & migrations early
+migrateAll()
 
 const client = new Client({
   intents: [
