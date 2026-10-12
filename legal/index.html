@@ -7,8 +7,9 @@
 <style>
   :root { color-scheme: light dark; }
   body { max-width: 40em; margin: 2em auto; padding: 0 1em; font-family: system-ui, sans-serif; line-height: 1.5; }
-  #install { display: flex; flex-direction: column; align-items: center; justify-items: center; }
+  #install { display: flex; flex-direction: column; align-items: center; justify-content: center; }
   #install > * { padding: 0.25rem 0.5rem; background-color: #88f; color: white; font-weight: 700; text-decoration: none; border-radius: 0.25rem; }
+  #legal { padding-top: 1rem; display: flex; flex-direction: row; align-items: center; justify-content: center; gap: 1rem; flex-wrap: wrap; }
 </style>
 </head>
 <body>
@@ -22,11 +23,17 @@ It features numerous moderation tools, localization, natural-language granular i
 Add to your account to use /remind, or on a server to use the moderation features.
 </p>
 
-<p id="install">
+<div id="install">
 <a href="https://discord.com/oauth2/authorize?client_id=444884890878738442" target="_blank">
 Install Bot
 </a>
-</p>
+</div>
+
+<div id="legal">
+<a href="/">Homepage</a>
+<a href="/terms">Terms of Service</a>
+<a href="/privacy">Privacy Policy</a>
+</div>
 
 </body>
 </html>
