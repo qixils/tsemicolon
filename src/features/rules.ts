@@ -13,7 +13,7 @@ import { localizedDescription, localizedName, type Feature } from '../feature.js
 import { t } from '../i18n.js'
 import { chunkLines, truncate } from '../util/discord.js'
 
-const db = withSchema(`
+const db = withSchema('rules', [`
   CREATE TABLE IF NOT EXISTS rules (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id TEXT    NOT NULL,
@@ -21,7 +21,7 @@ const db = withSchema(`
     ping     INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS rules_by_guild ON rules (guild_id, id);
-`)
+`])
 
 /** How long someone has to wait between shares */
 const SHARE_COOLDOWN_MILLIS = 60 * 1000

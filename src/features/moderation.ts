@@ -25,7 +25,7 @@ const DAY_SECONDS = 24 * 60 * 60
 // discord's new Timeout is more visually obvious and they're starting to send DMs for punishments
 // so I don't see much need for the hacky mute roles anymore.
 // still need to track the old ones to expire them tho
-const db = withSchema(`
+const db = withSchema('moderation', [`
   CREATE TABLE IF NOT EXISTS legacy_unmutes (
     guild_id TEXT    NOT NULL,
     user_id  TEXT    NOT NULL,
@@ -33,7 +33,7 @@ const db = withSchema(`
     run_at   INTEGER NOT NULL,
     PRIMARY KEY (guild_id, user_id, role_id)
   ) WITHOUT ROWID;
-`)
+`])
 
 export const addLegacyUnmute = (unmute: { guildId: string, userId: string, roleId: string, runAt: number }) => {
   db().prepare('INSERT OR REPLACE INTO legacy_unmutes (guild_id, user_id, role_id, run_at) VALUES (?, ?, ?, ?)')

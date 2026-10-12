@@ -134,7 +134,7 @@
   "command.remind.option.reminder.name": "reminder",
   "command.remind.option.reminder.description": "What to remind you of",
   "command.remind.option.hidden.name": "hidden",
-  "command.remind.option.hidden.description": "For servers, avoids publicly sharing the reminder in this channel",
+  "command.remind.option.hidden.description": "Avoids sharing the reminder with others in this channel",
 
   "command.role.name": "role",
   "command.role.description": "Add public roles to yourself",

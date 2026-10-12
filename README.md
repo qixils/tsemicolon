@@ -16,6 +16,8 @@ Shut down the old bot so all the state files flush then copy these files relativ
 
 ### Discord Developer Portal
 
+Under **Installation** enable **User Install** and **Guild Install**.
+
 Under **Bot -> Privileged Gateway Intents**
 enable **Server Members Intent** and **Message Content Intent**.
 

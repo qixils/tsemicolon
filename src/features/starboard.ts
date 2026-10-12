@@ -26,7 +26,7 @@ import { SENDABLE_TEXT_CHANNEL_TYPES, addMediaPreview, postableChannel, truncate
 import { emojiKey, parseEmoji, reactionKey } from '../util/emoji.js'
 import typia from 'typia'
 
-const db = withSchema(`
+const db = withSchema('starboard', [`
   CREATE TABLE IF NOT EXISTS starboards (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id          TEXT    NOT NULL,
@@ -53,7 +53,7 @@ const db = withSchema(`
     message_id TEXT PRIMARY KEY,
     post_id    TEXT NOT NULL
   ) WITHOUT ROWID;
-`)
+`])
 
 const NAMESPACE = 'starboard'
 export const DEFAULT_STAR = '⭐'

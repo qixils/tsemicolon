@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite'
-import { getDb } from '../db.js'
+import { getDb, migrate } from '../db.js'
 import { genderToCode, type Variant } from './variants.js'
 
 export interface LeaderboardRow {
@@ -9,7 +9,7 @@ export interface LeaderboardRow {
   count: number
 }
 
-const SCHEMA = `
+const MIGRATIONS = [`
   CREATE TABLE IF NOT EXISTS pokemon_caught (
     user_id    TEXT    NOT NULL,
     pokemon_id INTEGER NOT NULL,
@@ -24,7 +24,7 @@ const SCHEMA = `
     name       TEXT,
     last_catch INTEGER
   );
-`
+`]
 
 const asNumber = (value: unknown) => (typeof value === 'number' ? value : Number(value ?? 0))
 
@@ -34,7 +34,7 @@ export class PokemonStore {
 
   constructor(db = getDb()) {
     this.db = db
-    this.db.exec(SCHEMA)
+    migrate(this.db, 'pokemon', MIGRATIONS)
   }
 
   hasCaught(userId: string, pokemonId: number, variant: Variant): boolean {

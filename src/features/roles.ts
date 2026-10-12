@@ -29,14 +29,14 @@ const COLOR_PREFIX = 'color-'
 const STAFF_COLOR_PREFIX = 'scolor-'
 const DEFAULT_COLOR = 0x88297c
 
-const db = withSchema(`
+const db = withSchema('roles', [`
   CREATE TABLE IF NOT EXISTS flairs (
     guild_id    TEXT NOT NULL,
     role_id     TEXT NOT NULL,
     description TEXT,
     PRIMARY KEY (guild_id, role_id)
   ) WITHOUT ROWID;
-`)
+`])
 
 export const addFlair = (guildId: string, roleId: string, description: string | null) =>
   Number(db().prepare('INSERT OR IGNORE INTO flairs (guild_id, role_id, description) VALUES (?, ?, ?)')

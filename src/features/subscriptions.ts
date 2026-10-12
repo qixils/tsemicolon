@@ -29,7 +29,7 @@ const youtubeFeed = (channelId: string) => `https://www.youtube.com/feeds/videos
 const YOUTUBE_LINK = /^https?:\/\/(?:www\.|m\.)?youtube\.com\/.+/i
 const YOUTUBE_CHANNEL_ID = /UC[\w-]{21}[AQgw]/
 
-const db = withSchema(`
+const db = withSchema('subscriptions', [`
   CREATE TABLE IF NOT EXISTS subscriptions (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     guild_id     TEXT    NOT NULL,
@@ -42,7 +42,7 @@ const db = withSchema(`
     last_item_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS subscriptions_by_guild ON subscriptions (guild_id);
-`)
+`])
 
 type FeedType = 'xkcd' | 'youtube'
 

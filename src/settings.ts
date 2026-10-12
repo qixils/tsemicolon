@@ -24,14 +24,14 @@ import { t, type MaybeLocales, type MessageKey } from './i18n.js'
 import { registerLegacyImporter } from './legacy.js'
 import { SENDABLE_TEXT_CHANNEL_TYPES, postableChannel } from './util/discord.js'
 
-const db = withSchema(`
+const db = withSchema('settings', [`
   CREATE TABLE IF NOT EXISTS guild_settings (
     guild_id TEXT NOT NULL,
     key      TEXT NOT NULL,
     value    TEXT NOT NULL,
     PRIMARY KEY (guild_id, key)
   ) WITHOUT ROWID;
-`)
+`])
 
 /** Per-server configuration */
 export interface Settings {

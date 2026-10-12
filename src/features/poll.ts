@@ -31,7 +31,7 @@ const MAX_SHORTHAND = 200
 /** How long a rejected poll can still be reopened with "Edit Poll" */
 const DRAFT_LIFETIME = 24 * 60 * 60 * 1000
 
-const db = withSchema(`
+const db = withSchema('poll', [`
   -- a rejected poll's contents, so "Edit Poll" can reopen the form already filled in
   CREATE TABLE IF NOT EXISTS poll_drafts (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,7 +40,7 @@ const db = withSchema(`
     message    TEXT    NOT NULL,
     created_at INTEGER NOT NULL
   );
-`)
+`])
 
 /** 0..10 as keycap emojis */
 const keycap = (digit: number) => digit === 10 ? '🔟' : `${digit}️⃣`

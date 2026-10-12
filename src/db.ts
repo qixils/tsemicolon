@@ -19,19 +19,6 @@ export const closeDb = () => {
   db = undefined
 }
 
-/** Returns a database accessor that runs a setup schema on first use */
-export const withSchema = (schema: string) => {
-  let ready = false
-  return (): DatabaseSync => {
-    const database = getDb()
-    if (!ready) {
-      database.exec(schema)
-      ready = true
-    }
-    return database
-  }
-}
-
 export const transaction = <T>(database: DatabaseSync, work: () => T): T => {
   database.exec('BEGIN')
   try {
@@ -41,6 +28,58 @@ export const transaction = <T>(database: DatabaseSync, work: () => T): T => {
   } catch (error) {
     database.exec('ROLLBACK')
     throw error
+  }
+}
+
+/**
+ * Runs a series of versioned migrations for a named database accessor and saves the new version to database.
+ * Uses transactions to avoid losing data in case of an issue with a migrator.
+ * Migrators should not be changed unless to fix such issues.
+ */
+export const migrate = (database: DatabaseSync, name: string, migrations: readonly string[]) => {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_versions (
+      name    TEXT    PRIMARY KEY,
+      version INTEGER NOT NULL
+    ) WITHOUT ROWID
+  `)
+  const row = database.prepare('SELECT version FROM schema_versions WHERE name = ?').get(name)
+  const current = row ? Number(row['version']) : 0
+  if (current > migrations.length) {
+    throw new Error(`Database schema "${name}" is at version ${current}, but this build only knows ${migrations.length}`)
+  }
+
+  migrations.slice(current).forEach((sql, index) => {
+    const version = current + index + 1
+    transaction(database, () => {
+      database.exec(sql)
+      database.prepare(`
+        INSERT INTO schema_versions (name, version) VALUES (?, ?)
+        ON CONFLICT (name) DO UPDATE SET version = excluded.version
+      `).run(name, version)
+    })
+    console.log(`Migrated "${name}" schema to version ${version}`)
+  })
+}
+
+const schemaNames = new Set<string>()
+
+/**
+ * Returns a database accessor that applies `migrations` on first use and to upgrade existing databases.
+ * `name` identifies this accessor for versioning, it should not be changed.
+ */
+export const withSchema = (name: string, migrations: readonly string[]): (() => DatabaseSync) => {
+  if (schemaNames.has(name)) throw new Error(`Duplicate schema "${name}"`)
+  schemaNames.add(name)
+
+  let ready = false
+  return (): DatabaseSync => {
+    const database = getDb()
+    if (!ready) {
+      migrate(database, name, migrations)
+      ready = true
+    }
+    return database
   }
 }
 

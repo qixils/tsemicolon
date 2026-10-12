@@ -2,6 +2,7 @@ import {
   ActionRowBuilder,
   ApplicationCommandOptionType,
   ApplicationCommandType,
+  ApplicationIntegrationType,
   ButtonBuilder,
   ButtonStyle,
   ComponentType,
@@ -22,11 +23,12 @@ import { parseWhen } from '../util/time.js'
 const NAMESPACE = 'remind'
 const TICK = 5000
 
-/** recently attempted but failed reminders. just saves performance & ratelimits, not worth saving to db */
-const attemptedReminders = new Map<number, number>()
-const REATTEMPT_AFTER_MILLIS = 1000 * 60 * 60
+/** if we fail to DM a user then we retry after this time */
+const REATTEMPT_AFTER_MILLIS = 24 * 60 * 60 * 1000
+/** if we fail to DM a user this many times we give up */
+const MAX_ATTEMPTS = 30
 
-const db = withSchema(`
+const db = withSchema('reminders', [`
   CREATE TABLE IF NOT EXISTS reminders (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    TEXT    NOT NULL,
@@ -39,16 +41,19 @@ const db = withSchema(`
     content    TEXT    NOT NULL,
     remind_at  INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
-    status     TEXT    NOT NULL DEFAULT 'pending', -- pending | sent | cancelled
+    status     TEXT    NOT NULL DEFAULT 'pending', -- pending | sent | cancelled | failed
     hidden     INTEGER NOT NULL DEFAULT 0,
     -- the recipient's locale, for the reminder DM
-    locale     TEXT
+    locale     TEXT,
+    -- failed delivery attempts, and when to try again
+    attempts   INTEGER NOT NULL DEFAULT 0,
+    retry_at   INTEGER
   );
-  CREATE INDEX IF NOT EXISTS reminders_due ON reminders (status, remind_at);
+  CREATE INDEX IF NOT EXISTS reminders_due ON reminders (status, COALESCE(retry_at, remind_at));
   CREATE INDEX IF NOT EXISTS reminders_by_parent ON reminders (parent_id, user_id);
-`)
+`])
 
-type Status = 'pending' | 'sent' | 'cancelled'
+type Status = 'pending' | 'sent' | 'cancelled' | 'failed'
 
 export interface Reminder {
   id: number
@@ -180,13 +185,15 @@ const onButton = async (interaction: ButtonInteraction, action: string, reminder
     case 'cancel': {
       if (!isOwner) return ephemeral(t(locales, 'remind.owner_only'))
       if (!setStatus(reminder.id, 'cancelled')) {
-        return ephemeral(t(locales, reminder.status === 'sent' ? 'remind.already_sent' : 'remind.already_cancelled'))
+        return ephemeral(t(locales, reminder.status === 'sent' || reminder.status === 'failed'
+          ? 'remind.already_sent'
+          : 'remind.already_cancelled'))
       }
       // the original message stays as-is (it may be public), only the owner hears about the cancellation
       await interaction.update({ components: disableClicked(interaction) })
       await interaction.followUp({
         content: t(locales, 'remind.cancelled', { text: quote(reminder.content) }),
-        ...(interaction.inGuild() && { flags: MessageFlags.Ephemeral }),
+        ...(interaction.context !== InteractionContextType.BotDM && { flags: MessageFlags.Ephemeral }),
       })
       return
     }
@@ -275,22 +282,25 @@ const tick = async (client: Client) => {
   ticking = true
   try {
     const now = Date.now()
+    const due = db().prepare(`
+      SELECT * FROM reminders WHERE status = 'pending' AND COALESCE(retry_at, remind_at) <= ?
+      ORDER BY COALESCE(retry_at, remind_at) LIMIT 50
+    `).all(now)
+    for (const row of due) {
+      const reminder = toReminder(row)
+      const delivered = await deliver(client, reminder).catch(error => {
+        console.error(`Failed to deliver reminder ${reminder.id}:`, error)
+        return false
+      })
+      if (delivered) continue
 
-    for (const [reminder, failed] of [...attemptedReminders.entries()]) {
-      if ((failed + REATTEMPT_AFTER_MILLIS) > now) continue
-      attemptedReminders.delete(reminder)
-    }
-
-    const due = db().prepare("SELECT * FROM reminders WHERE status = 'pending' AND remind_at <= ? ORDER BY remind_at LIMIT 50")
-      .all(now).map(toReminder)
-    for (const reminder of due) {
-      if (attemptedReminders.has(reminder.id)) continue
-      await deliver(client, reminder)
-        .then(result => { if (!result) throw new Error("Failed to send DM") })
-        .catch(error => {
-          attemptedReminders.set(reminder.id, now)
-          console.error(`Failed to deliver reminder ${reminder.id}:`, error)
-        })
+      const attempts = int(row, 'attempts') + 1
+      if (attempts >= MAX_ATTEMPTS) {
+        setStatus(reminder.id, 'failed')
+        console.warn(`Gave up on reminder ${reminder.id} after ${attempts} failed deliveries`)
+      } else {
+        db().prepare('UPDATE reminders SET attempts = ?, retry_at = ? WHERE id = ?').run(attempts, now + REATTEMPT_AFTER_MILLIS, reminder.id)
+      }
     }
   } finally {
     ticking = false
@@ -302,7 +312,8 @@ export const remindersFeature: Feature = {
     ...localizedName('command.remind.name'),
     ...localizedDescription('command.remind.description'),
     type: ApplicationCommandType.ChatInput,
-    contexts: [InteractionContextType.Guild, InteractionContextType.BotDM],
+    integration_types: [ApplicationIntegrationType.GuildInstall, ApplicationIntegrationType.UserInstall],
+    contexts: [InteractionContextType.Guild, InteractionContextType.BotDM, InteractionContextType.PrivateChannel],
     options: [
       {
         type: ApplicationCommandOptionType.String,
@@ -332,8 +343,11 @@ export const remindersFeature: Feature = {
       const content = interaction.options.getString('reminder', true)
 
       const _hidden = interaction.options.getBoolean('hidden') ?? false
-      const ephemeral = _hidden && interaction.inGuild()
-      const unjoinable = _hidden || !interaction.inGuild()
+      // keep the message private if they requested it and they're not in our private DMs
+      const ephemeral = _hidden && interaction.context !== InteractionContextType.BotDM
+      // if we don't know what this server is or it's not a server then we can't DM them so they can't join
+      // (they also can't join if this is hidden)
+      const unjoinable = _hidden || !interaction.inCachedGuild()
 
       const at = parseWhen(input, locales)
       if (!at) {
@@ -365,7 +379,9 @@ export const remindersFeature: Feature = {
         withResponse: true,
         ...(ephemeral && { flags: MessageFlags.Ephemeral }),
       })
-      if (!ephemeral && response.resource?.message) setMessage(id, response.resource.message.id)
+      // double check that this message was actually visible (it might not be if a server disables external apps)
+      const message = response.resource?.message
+      if (message && !message.flags.has(MessageFlags.Ephemeral)) setMessage(id, message.id)
     },
   },
   components: {
