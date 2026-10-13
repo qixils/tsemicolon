@@ -373,7 +373,7 @@ export const logsFeature: Feature = {
     client.on(Events.UserUpdate, safely('rename', async (before, after) => {
       if (!before.partial) await onUserUpdate(client, before, after)
     }))
-    client.on(Events.MessageUpdate, safely('edit', (before, after) => onEdit(client, before, after)))
+    // client.on(Events.MessageUpdate, safely('edit', (before, after) => onEdit(client, before, after)))
     client.on(Events.MessageDelete, safely('delete', onDelete))
     client.on(Events.MessageBulkDelete, safely('bulk delete', (messages, channel) => onBulkDelete(messages, channel.guild)))
   },
