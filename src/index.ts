@@ -46,9 +46,9 @@ const client = new Client({
     // admin DM commands
     GatewayIntentBits.DirectMessages,
     // privileged: join/role/timeout logs and the member cache they diff against
-    // TODO GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMembers,
     // privileged: message logs and antispam read message text
-    // TODO GatewayIntentBits.MessageContent,
+    GatewayIntentBits.MessageContent,
   ],
   // events for things that aren't cached: reactions on old messages, deletions, DMs
   partials: [Partials.Channel, Partials.Message, Partials.Reaction, Partials.User, Partials.GuildMember],
@@ -75,7 +75,7 @@ const registry: FeatureRegistry = new FeatureRegistry([
   starboardFeature,
   rulesFeature,
   reportsFeature,
-  // TODO antispamFeature,
+  antispamFeature,
   joinRoleFeature,
   pollFeature,
   remindersFeature,
