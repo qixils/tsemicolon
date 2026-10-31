@@ -1,0 +1,13 @@
+{
+  "command.setup.option.channel.name": "채널",
+  "command.setup.messagelog-ignore.option.user.name": "사용자",
+  "command.setup.antispam.option.channel.name": "채널",
+  "command.setup.starboard.option.channel.name": "채널",
+  "command.ban.option.reason.name": "이유",
+  "command.mute.option.member.name": "멤버",
+  "command.mute.option.reason.name": "이유",
+  "command.rule.option.user.name": "사용자",
+  "command.subscribe.option.channel.name": "채널",
+  "command.pokemon.name": "포켓몬",
+  "command.pokemon.search.option.pokemon.name": "포켓몬"
+}

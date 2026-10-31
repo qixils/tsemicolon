@@ -1,0 +1,14 @@
+{
+  "command.setup.option.channel.name": "canal",
+  "command.setup.messagelog-ignore.option.user.name": "membre",
+  "command.setup.antispam.option.channel.name": "canal",
+  "command.setup.starboard.option.channel.name": "canal",
+  "command.ban.option.reason.name": "raison",
+  "command.mute.option.member.name": "membre",
+  "command.mute.option.reason.name": "raison",
+  "command.rule.option.user.name": "membre",
+  "command.subscribe.option.channel.name": "canal",
+  "command.subscribe.youtube.option.url.name": "url",
+  "command.pokemon.name": "pokemon",
+  "command.pokemon.search.option.pokemon.name": "pokemon"
+}

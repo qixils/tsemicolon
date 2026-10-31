@@ -1,0 +1,14 @@
+{
+  "command.setup.option.channel.name": "канал",
+  "command.setup.messagelog-ignore.option.user.name": "пользователь",
+  "command.setup.antispam.option.channel.name": "канал",
+  "command.setup.starboard.option.channel.name": "канал",
+  "command.ban.option.reason.name": "причина",
+  "command.mute.option.member.name": "участник",
+  "command.mute.option.reason.name": "причина",
+  "command.rule.option.user.name": "пользователь",
+  "command.subscribe.option.channel.name": "канал",
+  "command.subscribe.youtube.option.url.name": "ссылка",
+  "command.pokemon.name": "покемон",
+  "command.pokemon.search.option.pokemon.name": "покемон"
+}
