@@ -17,7 +17,7 @@
     "chrono-node": "^2.10.2",
     "discord.js": "^14.27.0",
     "dotenv": "^18.0.6",
-    "fast-xml-parser": "^5.11.2",
+    "fast-xml-parser": "^5.12.0",
     "pngjs": "^7.0.0",
     "typia": "^15.1.0"
   },
